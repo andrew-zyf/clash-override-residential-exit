@@ -3,8 +3,10 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 
-const scriptPath = path.join(__dirname, "..", "src", "家宽IP-链式代理.js");
-const scriptCode = fs.readFileSync(scriptPath, "utf8");
+const dnsSnifferScriptPath = path.join(__dirname, "..", "src", "DNS解析和域名嗅探.js");
+const chainProxyScriptPath = path.join(__dirname, "..", "src", "家宽IP-链式代理.js");
+const dnsSnifferScriptCode = fs.readFileSync(dnsSnifferScriptPath, "utf8");
+const chainProxyScriptCode = fs.readFileSync(chainProxyScriptPath, "utf8");
 
 const TEST_MIYA_CREDENTIALS = {
   username: "user",
@@ -17,11 +19,23 @@ const TEST_MIYA_CREDENTIALS = {
 // Sandbox + config fixtures
 // ---------------------------------------------------------------------------
 
-function loadSandbox() {
+function loadScriptSandbox(scriptCode, scriptPath) {
   const sandbox = { console, Object, Array, String, Error };
   vm.createContext(sandbox);
   vm.runInContext(scriptCode, sandbox, { filename: scriptPath });
   return sandbox;
+}
+
+function loadDnsSnifferSandbox() {
+  return loadScriptSandbox(dnsSnifferScriptCode, dnsSnifferScriptPath);
+}
+
+function loadChainProxySandbox() {
+  return loadScriptSandbox(chainProxyScriptCode, chainProxyScriptPath);
+}
+
+function cloneJson(value) {
+  return JSON.parse(JSON.stringify(value));
 }
 
 function createBaseConfig() {
@@ -44,11 +58,17 @@ function createBaseConfig() {
 }
 
 function runMain(configMutator, sandboxMutator) {
-  const sandbox = loadSandbox();
   const config = createBaseConfig();
-  if (typeof sandboxMutator === "function") sandboxMutator(sandbox);
   if (typeof configMutator === "function") configMutator(config);
-  return { sandbox, output: sandbox.main(config) };
+
+  const dnsSandbox = loadDnsSnifferSandbox();
+  dnsSandbox.main(config);
+  const chainState = cloneJson(config._azChainProxyState);
+  const dnsBase = cloneJson(dnsSandbox.BASE.dns);
+
+  const sandbox = loadChainProxySandbox();
+  if (typeof sandboxMutator === "function") sandboxMutator(sandbox);
+  return { sandbox, state: chainState, dnsBase, output: sandbox.main(config) };
 }
 
 // ---------------------------------------------------------------------------
@@ -70,12 +90,12 @@ function expectedGroupNames(sandbox) {
   };
 }
 
-function derivedBrowserProcessNames(sandbox) {
-  return sandbox.DERIVED.processNames.browser.slice();
+function derivedBrowserProcessNames(state) {
+  return state.derived.processNames.browser.slice();
 }
 
-function derivedAiCliProcessNames(sandbox) {
-  return sandbox.DERIVED.processNames.aiCli.slice();
+function derivedAiCliProcessNames(state) {
+  return state.derived.processNames.aiCli.slice();
 }
 
 // ---------------------------------------------------------------------------
@@ -267,11 +287,11 @@ function assertMediaRouting(output, sandbox) {
 
 }
 
-function assertBrowserRouting(output, sandbox) {
+function assertBrowserRouting(output, sandbox, state) {
   const names = expectedGroupNames(sandbox);
-  assertProcessRules(output, true, derivedBrowserProcessNames(sandbox), sandbox.UI_GROUPS.ai);
+  assertProcessRules(output, true, derivedBrowserProcessNames(state), sandbox.UI_GROUPS.ai);
   // 受管浏览器不应被误路由到媒体目标
-  assertProcessRules(output, false, derivedBrowserProcessNames(sandbox), names.media);
+  assertProcessRules(output, false, derivedBrowserProcessNames(state), names.media);
   // 未列入源的浏览器不应出现
   assertProcessRules(output, false, ["Google Chrome", "Arc", "Microsoft Edge", "Safari"], sandbox.UI_GROUPS.ai);
 }
@@ -284,7 +304,7 @@ function assertBrowserRoutingPriority(output, sandbox) {
   assertRuleAppearsBefore(output.rules, "DOMAIN-SUFFIX,docs.qq.com,DIRECT", browserRule);
 }
 
-function assertDomesticDirectCoverage(output, sandbox) {
+function assertDomesticDirectCoverage(output, dnsBase) {
   const officeDomains = ["+.docs.qq.com", "+.dingtalk.com", "+.feishu.cn", "+.wps.cn"];
   const cloudDomains = ["+.aliyuncs.com"];
   assertRulesExist(output.rules, officeDomains.map((d) =>
@@ -299,11 +319,11 @@ function assertDomesticDirectCoverage(output, sandbox) {
     "PROCESS-NAME,DingTalk,DIRECT",
     "PROCESS-NAME,Feishu,DIRECT"
   ]);
-  assertNameserverPolicyValues(output, officeDomains, sandbox.BASE.dns.domestic);
-  assertNameserverPolicyValues(output, cloudDomains, sandbox.BASE.dns.domestic);
+  assertNameserverPolicyValues(output, officeDomains, dnsBase.domestic);
+  assertNameserverPolicyValues(output, cloudDomains, dnsBase.domestic);
 }
 
-function assertOverseasAppDirectCoverage(output, sandbox) {
+function assertOverseasAppDirectCoverage(output, dnsBase) {
   const overseasAppDomains = ["+.tailscale.com", "+.tailscale.io", "+.ts.net"];
   assertRulesExist(output.rules, [
     "DOMAIN-SUFFIX,tailscale.com,DIRECT",
@@ -317,13 +337,13 @@ function assertOverseasAppDirectCoverage(output, sandbox) {
     "PROCESS-NAME,Tailscale,DIRECT",
     "PROCESS-NAME,tailscale,DIRECT"
   ]);
-  assertNameserverPolicyValues(output, overseasAppDomains, sandbox.BASE.dns.overseas);
+  assertNameserverPolicyValues(output, overseasAppDomains, dnsBase.overseas);
   assertIncludes(output.dns["fallback-filter"].domain, overseasAppDomains, "fallback-filter.domain");
   assertIncludes(output.sniffer["skip-domain"], overseasAppDomains, "sniffer.skip-domain");
   assertExcludes(output.dns["fake-ip-filter"], ["+.tailscale.com"], "fake-ip-filter");
 }
 
-function assertOverseasDohDirectCoverage(output, sandbox) {
+function assertOverseasDohDirectCoverage(output, dnsBase) {
   const domains = [
     "+.immersivetranslate.com",
     "+.mineru.org.cn"
@@ -331,18 +351,18 @@ function assertOverseasDohDirectCoverage(output, sandbox) {
   assertRulesExist(output.rules, domains.map((d) =>
     "DOMAIN-SUFFIX," + d.replace("+.", "") + ",DIRECT"
   ));
-  assertNameserverPolicyValues(output, domains, sandbox.BASE.dns.overseas);
+  assertNameserverPolicyValues(output, domains, dnsBase.overseas);
   assertIncludes(output.dns["fallback-filter"].domain, domains, "fallback-filter.domain");
   assertIncludes(output.sniffer["skip-domain"], domains, "sniffer.skip-domain");
 }
 
-function assertDnsAndSniffer(output, sandbox) {
+function assertDnsAndSniffer(output, dnsBase) {
   assertNameserverPolicyValues(
     output,
     ["+.sora.com", "+.notebooklm.google", "+.m365.cloud.microsoft", "+.meta.ai"],
-    sandbox.BASE.dns.overseas
+    dnsBase.overseas
   );
-  assertNameserverPolicyValues(output, ["+.push.apple.com"], sandbox.BASE.dns.domestic);
+  assertNameserverPolicyValues(output, ["+.push.apple.com"], dnsBase.domestic);
   assertIncludes(output.dns["fake-ip-filter"], ["+.push.apple.com", "+.xboxlive.com", "stun.*.*"], "fake-ip-filter");
   assertIncludes(output.dns["fallback-filter"].domain, ["+.sora.com", "+.youtube.com", "+.meta.ai"], "fallback-filter.domain");
   assertIncludes(output.sniffer["force-domain"], ["+.claude.ai", "+.google.com"], "sniffer.force-domain");
@@ -354,42 +374,58 @@ function assertDnsAndSniffer(output, sandbox) {
 // ---------------------------------------------------------------------------
 
 function testDefaultConfig() {
-  const { sandbox, output } = runMain();
+  const { sandbox, state, dnsBase, output } = runMain();
   assert.strictEqual(sandbox.USER_OPTIONS.routeBrowserToChain, true);
   assert.strictEqual(output._miya, undefined);
+  assert.strictEqual(output._azChainProxyState, undefined);
   assertManagedProxyTopology(output, sandbox);
   assertCoreStrictRouting(output, sandbox);
   assertMediaRouting(output, sandbox);
-  assertBrowserRouting(output, sandbox);
+  assertBrowserRouting(output, sandbox, state);
   assertBrowserRoutingPriority(output, sandbox);
-  assertDomesticDirectCoverage(output, sandbox);
-  assertOverseasAppDirectCoverage(output, sandbox);
-  assertOverseasDohDirectCoverage(output, sandbox);
-  assertDnsAndSniffer(output, sandbox);
+  assertDomesticDirectCoverage(output, dnsBase);
+  assertOverseasAppDirectCoverage(output, dnsBase);
+  assertOverseasDohDirectCoverage(output, dnsBase);
+  assertDnsAndSniffer(output, dnsBase);
   assertNoDuplicateRuleIdentities(output.rules.slice(0, 250));
 }
 
+function testChainProxyRequiresDnsSnifferState() {
+  const sandbox = loadChainProxySandbox();
+  assert.throws(() => sandbox.main(createBaseConfig()), /缺少 DNS解析和域名嗅探/);
+}
+
+function testChainProxyRejectsMismatchedDnsSnifferState() {
+  const config = createBaseConfig();
+  const dnsSandbox = loadDnsSnifferSandbox();
+  dnsSandbox.main(config);
+  config._azChainProxyState.version = "0.0";
+
+  const sandbox = loadChainProxySandbox();
+  assert.throws(() => sandbox.main(config), /版本不匹配/);
+}
+
 function testDisableBrowserProcessProxy() {
-  const { sandbox, output } = runMain(null, (sb) => {
+  const { sandbox, state, output } = runMain(null, (sb) => {
     sb.USER_OPTIONS.routeBrowserToChain = false;
   });
   const names = expectedGroupNames(sandbox);
-  assertProcessRules(output, false, derivedBrowserProcessNames(sandbox), sandbox.UI_GROUPS.ai);
+  assertProcessRules(output, false, derivedBrowserProcessNames(state), sandbox.UI_GROUPS.ai);
 }
 
 function testAiCliProcessProxyDefaultsOn() {
-  const { sandbox, output } = runMain();
+  const { sandbox, state, output } = runMain();
   const names = expectedGroupNames(sandbox);
-  assertProcessRules(output, true, derivedAiCliProcessNames(sandbox), sandbox.UI_GROUPS.ai);
+  assertProcessRules(output, true, derivedAiCliProcessNames(state), sandbox.UI_GROUPS.ai);
   assertProcessRules(output, false, ["opencode"], sandbox.UI_GROUPS.ai);
 }
 
 function testAiCliProcessProxyAlwaysOn() {
-  const { sandbox, output } = runMain(null, (sb) => {
+  const { sandbox, state, output } = runMain(null, (sb) => {
     sb.USER_OPTIONS.routeBrowserToChain = false;
   });
   const names = expectedGroupNames(sandbox);
-  assertProcessRules(output, true, derivedAiCliProcessNames(sandbox), sandbox.UI_GROUPS.ai);
+  assertProcessRules(output, true, derivedAiCliProcessNames(state), sandbox.UI_GROUPS.ai);
 }
 
 function testOnlyAiAndBrowserProcessesAreManaged() {
@@ -403,10 +439,13 @@ function testOnlyAiAndBrowserProcessesAreManaged() {
 }
 
 function testMissingRegionFails() {
-  const sandbox = loadSandbox();
+  const dnsSandbox = loadDnsSnifferSandbox();
+  const config = createBaseConfig();
+  dnsSandbox.main(config);
+  const sandbox = loadChainProxySandbox();
   sandbox.USER_OPTIONS.chainRegion = "JP";
   sandbox.BASE.regionFallbackOrder.chain = [];
-  assert.throws(() => sandbox.main(createBaseConfig()), /未找到可用的 chainRegion 节点/);
+  assert.throws(() => sandbox.main(config), /未找到可用的 chainRegion 节点/);
 }
 
 // testMissingMediaRegionFails removed – mediaRegion config no longer exists
@@ -426,20 +465,23 @@ function testChainRegionFallsBackToAvailableRegion() {
 // testMediaRegionFallsBackToAvailableRegion removed – mediaRegion config no longer exists
 
 function testMissingStrictTargetFails() {
-  const sandbox = loadSandbox();
+  const dnsSandbox = loadDnsSnifferSandbox();
+  const config = createBaseConfig();
+  dnsSandbox.main(config);
+  const sandbox = loadChainProxySandbox();
   const original = sandbox.resolveRoutingTargets;
   sandbox.resolveRoutingTargets = (config, chainRegion) => {
     const rt = original(config, chainRegion);
     rt.strictAiTarget = "错误目标";
     return rt;
   };
-  assert.throws(() => sandbox.main(createBaseConfig()),
+  assert.throws(() => sandbox.main(config),
     /域外 AI 与支撑平台未直接指向当前 chainRegion 出口/);
 }
 
 function testExistingManagedObjectsAreReconciled() {
   const { sandbox, output } = runMain((config) => {
-    const base = loadSandbox().BASE;
+    const base = loadChainProxySandbox().BASE;
     const nodeNames = base.nodeNames;
     const suffix = base.groupNameSuffixes;
 
@@ -460,7 +502,7 @@ function testExistingManagedObjectsAreReconciled() {
 
 function testChainGroupIsNotReusedAsRelayTarget() {
   const { sandbox, output } = runMain((config) => {
-    const base = loadSandbox().BASE;
+    const base = loadChainProxySandbox().BASE;
     const chainName = base.chainGroupName;
     config["proxy-groups"].push({
       name: chainName, type: "select",
@@ -481,7 +523,7 @@ function testBadExternalRegionGroupIsNotReused() {
 
 function testNodeSelectionKeepsOnlyCurrentRelayGroup() {
   const { sandbox, output } = runMain((config) => {
-    const base = loadSandbox().BASE;
+    const base = loadChainProxySandbox().BASE;
     const staleRelay = "HK" + base.groupNameSuffixes.relaySuffix;
     config["proxy-groups"][0].proxies = ["🇸🇬 SG Auto 01", staleRelay];
   });
@@ -492,7 +534,9 @@ function testRepeatedRunDoesNotCreateSelfReference() {
   const first = runMain();
   const rerunInput = JSON.parse(JSON.stringify(first.output));
   rerunInput._miya = JSON.parse(JSON.stringify(TEST_MIYA_CREDENTIALS));
-  const sandbox = loadSandbox();
+  const dnsSandbox = loadDnsSnifferSandbox();
+  dnsSandbox.main(rerunInput);
+  const sandbox = loadChainProxySandbox();
   const second = sandbox.main(rerunInput);
   const names = expectedGroupNames(sandbox);
 
@@ -509,6 +553,8 @@ function testRepeatedRunDoesNotCreateSelfReference() {
 
 const tests = [
   testDefaultConfig,
+  testChainProxyRequiresDnsSnifferState,
+  testChainProxyRejectsMismatchedDnsSnifferState,
   testDisableBrowserProcessProxy,
   testAiCliProcessProxyDefaultsOn,
   testAiCliProcessProxyAlwaysOn,

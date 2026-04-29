@@ -8,7 +8,7 @@ AI 平台（OpenAI、Anthropic 等）的风控系统会追踪 IP 指纹一致性
 
 本脚本的解决方案：**机场节点提供速度，家宽 IP 提供纯净出口**，通过三层防泄漏机制确保所有 AI 相关流量（含登录验证、支付、遥测）始终从同一个家宽 IP 出站。
 
-**当前版本：** v10.0
+**当前版本：** v10.1
 
 ## Features
 
@@ -33,7 +33,8 @@ AI 平台（OpenAI、Anthropic 等）的风控系统会追踪 IP 指纹一致性
 ### 1. 下载脚本
 
 - [`src/MiyaIP 凭证.js`](src/MiyaIP%20%E5%87%AD%E8%AF%81.js) — 凭证模板（一次性填入）
-- [`src/家宽IP-链式代理.js`](src/%E5%AE%B6%E5%AE%BDIP-%E9%93%BE%E5%BC%8F%E4%BB%A3%E7%90%86.js) — 主脚本
+- [`src/DNS解析和域名嗅探.js`](src/DNS%E8%A7%A3%E6%9E%90%E5%92%8C%E5%9F%9F%E5%90%8D%E5%97%85%E6%8E%A2.js) — DNS / Sniffer 前置脚本
+- [`src/家宽IP-链式代理.js`](src/%E5%AE%B6%E5%AE%BDIP-%E9%93%BE%E5%BC%8F%E4%BB%A3%E7%90%86.js) — 链式代理脚本
 
 ### 2. 填写家宽凭证
 
@@ -53,10 +54,11 @@ function main(config) {
 
 ### 3. 按顺序导入覆写
 
-在 Clash Party 覆写页**按以下顺序**导入（顺序反了会因读不到 `config._miya` 而报错）：
+在 Clash Party 覆写页**按以下顺序**导入：
 
-1. `MiyaIP 凭证.js`
-2. `家宽IP-链式代理.js`
+1. `DNS解析和域名嗅探.js`
+2. `MiyaIP 凭证.js`（静态 IP 信息登记）
+3. `家宽IP-链式代理.js`
 
 ![Clash Party 覆写页面](img/Clash%20Party%20覆写.png)
 
@@ -85,7 +87,7 @@ var USER_OPTIONS = {
 
 ### 5. 启用
 
-启用两份覆写 → 切到机场订阅 → 启动代理（**规则模式** + **TUN 模式**）。不要选中 Clash Party 原生的「DNS 覆写」和「嗅探覆写」选项，脚本已通过 POLICY 统一接管 DNS 和 Sniffer 配置。
+启用上述覆写 → 切到机场订阅 → 启动代理（**规则模式** + **TUN 模式**）。不要选中 Clash Party 原生的「DNS 覆写」和「嗅探覆写」选项，前置脚本已通过 POLICY 统一接管 DNS 和 Sniffer 配置。
 
 脚本会注入以下代理组：
 
@@ -107,13 +109,14 @@ var USER_OPTIONS = {
 
 ### FAQ
 
+- **报错 `缺少 DNS解析和域名嗅探.js`** — 链式代理脚本没有读到前置脚本生成的 `_azChainProxyState`。把 `DNS解析和域名嗅探.js` 放到最前面。
 - **报错 `缺少 config._miya`** — 覆写顺序反了。把 `MiyaIP 凭证.js` 拖到主脚本前面，确认凭证已填好。
 - **报错 `未找到可用的 chainRegion 节点`** — 订阅中没有可识别的目标地区节点。确认至少有一个 `US / JP / HK / SG / TW` 节点，且节点名能被 `BASE.regions[XX].regex` 匹配（默认识别国旗 emoji、中文地区名、`US-` / `JP-` 等前缀）。
 
 ### 升级 / 卸载
 
-- **升级**：重新下载 `家宽IP-链式代理.js` 覆盖即可。`MiyaIP 凭证.js` 不需要动。脚本是幂等的，重复运行不会产生重复组。
-- **卸载**：关掉两份覆写，刷新订阅即可还原。
+- **升级**：重新下载 `DNS解析和域名嗅探.js` 和 `家宽IP-链式代理.js` 覆盖即可。`MiyaIP 凭证.js` 不需要动。脚本是幂等的，重复运行不会产生重复组。
+- **卸载**：关掉相关覆写，刷新订阅即可还原。
 
 ## Testing
 
@@ -121,41 +124,15 @@ var USER_OPTIONS = {
 node tests/validate.js
 ```
 
-使用 `vm` 隔离加载脚本，覆盖默认配置、地区 fallback、开关组合、缺失地区报错、幂等重跑、受管对象修复等 13 个用例。
+使用 `vm` 隔离加载脚本，覆盖默认配置、前置脚本顺序、前后脚本版本一致性、地区 fallback、开关组合、缺失地区报错、幂等重跑、受管对象修复等 15 个用例。
 
 ## Architecture
 
 ### 数据流
 
-```mermaid
-flowchart LR
-  subgraph 输入
-    USER["USER_OPTIONS"]
-    BASE["BASE"]
-    SRC["CHAIN / MEDIA<br/>CDN / CN / OVERSEAS<br/>LOCAL / NETWORK"]
-  end
+![数据流架构图](img/data-flow.png)
 
-  subgraph 策略
-    POL["POLICY"]
-    DER["DERIVED"]
-  end
-
-  subgraph 输出
-    CFG[("Clash 配置")]
-  end
-
-  EXP["EXPECTED_ROUTES"]
-  VAL[["tests/validate.js"]]
-
-  SRC --> POL --> DER --> CFG
-  USER --> DER
-  BASE --> CFG
-  EXP --> VAL
-  DER -.-> VAL
-  CFG -.-> VAL
-```
-
-三层流水线：**输入 → 策略 → 配置**。每层只读上一层的输出。
+三层流水线：**输入 → 策略 → 配置**。每层只读上一层的输出。运行时拆成两段：`DNS解析和域名嗅探.js` 先写入 `config.dns` / `config.sniffer`，并把 `DERIVED` 暂存到 `_azChainProxyState`；`MiyaIP 凭证.js` 完成静态 IP 信息登记并写入 `config._miya`，最后 `家宽IP-链式代理.js` 消费这两份临时状态写入分流规则并删除临时字段。
 
 | 模块 | 说明 |
 |---|---|

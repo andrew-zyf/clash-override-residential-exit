@@ -4,6 +4,14 @@
 
 ---
 
+## v10.1 (2026-04-29)
+
+- 将 DNS 解析与域名嗅探拆到 `DNS解析和域名嗅探.js` 前置覆写；链式代理脚本改为消费 `_azChainProxyState`，执行顺序固定为 DNS/Sniffer → MiyaIP 凭证（静态 IP 信息登记）→ 链式代理。
+- `tests/validate.js` 改为按多覆写顺序运行，并新增缺少 DNS/Sniffer 前置状态的顺序校验。
+- `_azChainProxyState` 精简为仅传递 `DERIVED` 派生状态，并新增前后脚本版本一致性校验。
+
+---
+
 ## v10.0 (2026-04-17)
 
 重大架构升级：代理组重命名、POLICY/DERIVED 层简化、域名覆盖全面扩充、DNS 防泄漏加固。
