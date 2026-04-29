@@ -4,5 +4,8 @@ src/MiyaIP 凭证.js
 # 本地草稿目录
 docs/
 
+# 编辑器本地配置
+.vscode/
+
 # 系统文件
 .DS_Store
