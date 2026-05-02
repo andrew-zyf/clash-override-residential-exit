@@ -4,6 +4,15 @@
 
 ---
 
+## v11.0 (2026-05-02)
+
+- 将 `DNS解析和域名嗅探.js`、`MiyaIP 凭证_样本.js`、`家宽IP-链式代理.js` 合并为单一入口 `家宽IP-链式代理.js`。
+- 新增顶部 `MIYA_CREDENTIALS` 配置块；脚本运行时临时写入凭证并在生成最终配置前删除，避免凭证泄漏到 Clash 配置。
+- DNS / Sniffer 逻辑改为内部模块，仍与路由规则共享同一份 POLICY / DERIVED 派生结果，保持域内、域外解析策略一致。
+- `tests/validate.js` 改为只加载单文件脚本，并新增空凭证校验；README 改为单文件导入流程。
+
+---
+
 ## v10.1 (2026-04-29)
 
 - 将 DNS 解析与域名嗅探拆到 `DNS解析和域名嗅探.js` 前置覆写；链式代理脚本改为消费 `_azChainProxyState`，执行顺序固定为 DNS/Sniffer → MiyaIP 凭证（静态 IP 信息登记）→ 链式代理。

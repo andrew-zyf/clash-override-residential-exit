@@ -3,10 +3,8 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 
-const dnsSnifferScriptPath = path.join(__dirname, "..", "src", "DNS解析和域名嗅探.js");
-const chainProxyScriptPath = path.join(__dirname, "..", "src", "家宽IP-链式代理.js");
-const dnsSnifferScriptCode = fs.readFileSync(dnsSnifferScriptPath, "utf8");
-const chainProxyScriptCode = fs.readFileSync(chainProxyScriptPath, "utf8");
+const unifiedScriptPath = path.join(__dirname, "..", "src", "家宽IP-链式代理.js");
+const unifiedScriptCode = fs.readFileSync(unifiedScriptPath, "utf8");
 
 const TEST_MIYA_CREDENTIALS = {
   username: "user",
@@ -26,12 +24,8 @@ function loadScriptSandbox(scriptCode, scriptPath) {
   return sandbox;
 }
 
-function loadDnsSnifferSandbox() {
-  return loadScriptSandbox(dnsSnifferScriptCode, dnsSnifferScriptPath);
-}
-
 function loadChainProxySandbox() {
-  return loadScriptSandbox(chainProxyScriptCode, chainProxyScriptPath);
+  return loadScriptSandbox(unifiedScriptCode, unifiedScriptPath);
 }
 
 function cloneJson(value) {
@@ -52,8 +46,7 @@ function createBaseConfig() {
       "DOMAIN-SUFFIX,claude.ai,DIRECT",
       "DOMAIN-SUFFIX,tailscale.com,REJECT",
       "MATCH,办公娱乐好帮手"
-    ],
-    _miya: JSON.parse(JSON.stringify(TEST_MIYA_CREDENTIALS))
+    ]
   };
 }
 
@@ -61,14 +54,15 @@ function runMain(configMutator, sandboxMutator) {
   const config = createBaseConfig();
   if (typeof configMutator === "function") configMutator(config);
 
-  const dnsSandbox = loadDnsSnifferSandbox();
-  dnsSandbox.main(config);
-  const chainState = cloneJson(config._azChainProxyState);
-  const dnsBase = cloneJson(dnsSandbox.BASE.dns);
-
   const sandbox = loadChainProxySandbox();
+  sandbox.MIYA_CREDENTIALS = cloneJson(TEST_MIYA_CREDENTIALS);
   if (typeof sandboxMutator === "function") sandboxMutator(sandbox);
-  return { sandbox, state: chainState, dnsBase, output: sandbox.main(config) };
+  return {
+    sandbox,
+    state: { derived: cloneJson(sandbox.DNS_SNIFFER_MODULE.DERIVED) },
+    dnsBase: cloneJson(sandbox.DNS_SNIFFER_MODULE.BASE.dns),
+    output: sandbox.main(config)
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -390,19 +384,9 @@ function testDefaultConfig() {
   assertNoDuplicateRuleIdentities(output.rules.slice(0, 250));
 }
 
-function testChainProxyRequiresDnsSnifferState() {
+function testRequiresConfiguredMiyaCredentials() {
   const sandbox = loadChainProxySandbox();
-  assert.throws(() => sandbox.main(createBaseConfig()), /缺少 DNS解析和域名嗅探/);
-}
-
-function testChainProxyRejectsMismatchedDnsSnifferState() {
-  const config = createBaseConfig();
-  const dnsSandbox = loadDnsSnifferSandbox();
-  dnsSandbox.main(config);
-  config._azChainProxyState.version = "0.0";
-
-  const sandbox = loadChainProxySandbox();
-  assert.throws(() => sandbox.main(config), /版本不匹配/);
+  assert.throws(() => sandbox.main(createBaseConfig()), /MIYA_CREDENTIALS/);
 }
 
 function testDisableBrowserProcessProxy() {
@@ -439,13 +423,11 @@ function testOnlyAiAndBrowserProcessesAreManaged() {
 }
 
 function testMissingRegionFails() {
-  const dnsSandbox = loadDnsSnifferSandbox();
-  const config = createBaseConfig();
-  dnsSandbox.main(config);
   const sandbox = loadChainProxySandbox();
+  sandbox.MIYA_CREDENTIALS = cloneJson(TEST_MIYA_CREDENTIALS);
   sandbox.USER_OPTIONS.chainRegion = "JP";
   sandbox.BASE.regionFallbackOrder.chain = [];
-  assert.throws(() => sandbox.main(config), /未找到可用的 chainRegion 节点/);
+  assert.throws(() => sandbox.main(createBaseConfig()), /未找到可用的 chainRegion 节点/);
 }
 
 // testMissingMediaRegionFails removed – mediaRegion config no longer exists
@@ -465,17 +447,15 @@ function testChainRegionFallsBackToAvailableRegion() {
 // testMediaRegionFallsBackToAvailableRegion removed – mediaRegion config no longer exists
 
 function testMissingStrictTargetFails() {
-  const dnsSandbox = loadDnsSnifferSandbox();
-  const config = createBaseConfig();
-  dnsSandbox.main(config);
   const sandbox = loadChainProxySandbox();
+  sandbox.MIYA_CREDENTIALS = cloneJson(TEST_MIYA_CREDENTIALS);
   const original = sandbox.resolveRoutingTargets;
   sandbox.resolveRoutingTargets = (config, chainRegion) => {
     const rt = original(config, chainRegion);
     rt.strictAiTarget = "错误目标";
     return rt;
   };
-  assert.throws(() => sandbox.main(config),
+  assert.throws(() => sandbox.main(createBaseConfig()),
     /域外 AI 与支撑平台未直接指向当前 chainRegion 出口/);
 }
 
@@ -533,10 +513,8 @@ function testNodeSelectionKeepsOnlyCurrentRelayGroup() {
 function testRepeatedRunDoesNotCreateSelfReference() {
   const first = runMain();
   const rerunInput = JSON.parse(JSON.stringify(first.output));
-  rerunInput._miya = JSON.parse(JSON.stringify(TEST_MIYA_CREDENTIALS));
-  const dnsSandbox = loadDnsSnifferSandbox();
-  dnsSandbox.main(rerunInput);
   const sandbox = loadChainProxySandbox();
+  sandbox.MIYA_CREDENTIALS = cloneJson(TEST_MIYA_CREDENTIALS);
   const second = sandbox.main(rerunInput);
   const names = expectedGroupNames(sandbox);
 
@@ -553,8 +531,7 @@ function testRepeatedRunDoesNotCreateSelfReference() {
 
 const tests = [
   testDefaultConfig,
-  testChainProxyRequiresDnsSnifferState,
-  testChainProxyRejectsMismatchedDnsSnifferState,
+  testRequiresConfiguredMiyaCredentials,
   testDisableBrowserProcessProxy,
   testAiCliProcessProxyDefaultsOn,
   testAiCliProcessProxyAlwaysOn,
