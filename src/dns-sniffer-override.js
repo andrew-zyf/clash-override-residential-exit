@@ -7,7 +7,7 @@
 // domain sniffing while keeping your existing proxy subscription rules.
 // Compatibility: Clash Party / Mihomo JavaScript override; ES5 syntax only.
 //
-// @version 11.1
+// @version 11.2
 
 var DNS_SNIFFER_MODULE = (function () {
 // ---------------------------------------------------------------------------
@@ -1388,7 +1388,7 @@ function buildSnifferConfig(derived) {
 // ---------------------------------------------------------------------------
 
 var CHAIN_PROXY_STATE_KEY = "_azChainProxyState";
-var CHAIN_PROXY_STATE_VERSION = "11.1";
+var CHAIN_PROXY_STATE_VERSION = "11.2";
 
 function buildChainProxyState(derived) {
   return {

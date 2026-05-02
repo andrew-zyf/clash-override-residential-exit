@@ -8,7 +8,7 @@ AI 平台（OpenAI、Anthropic 等）的风控系统会追踪 IP 指纹一致性
 
 本脚本的解决方案：**机场节点提供速度，家宽 IP 提供纯净出口**，通过三层防泄漏机制确保所有 AI 相关流量（含登录验证、支付、遥测）始终从同一个家宽 IP 出站。
 
-**当前版本：** v11.1
+**当前版本：** v11.2
 
 ## Features
 
@@ -35,7 +35,7 @@ AI 平台（OpenAI、Anthropic 等）的风控系统会追踪 IP 指纹一致性
 | 选项 | 脚本 | 适合场景 | 行为边界 |
 |---|---|---|---|
 | Option A：独立 DNS / Sniffer | [`src/dns-sniffer-override.js`](src/dns-sniffer-override.js) | 只想改善域内 / 域外 DNS 解析、Fake-IP 和域名嗅探，不想改现有代理组和分流规则 | 只写 `config.dns` / `config.sniffer`，不注入代理节点，不改 `rules` |
-| Option B：完整链式代理 | [`src/家宽IP-链式代理.js`](src/%E5%AE%B6%E5%AE%BDIP-%E9%93%BE%E5%BC%8F%E4%BB%A3%E7%90%86.js) | 需要把 AI、开发平台、支付 / 验证 / 遥测统一锁定到家宽出口，同时保留媒体分离和域内直连 | 写入 DNS / Sniffer、MiyaIP 节点、代理组和分流规则 |
+| Option B：完整链式代理 | [`src/residential-chain-proxy-override.js`](src/residential-chain-proxy-override.js) | 需要把 AI、开发平台、支付 / 验证 / 遥测统一锁定到家宽出口，同时保留媒体分离和域内直连 | 写入 DNS / Sniffer、MiyaIP 节点、代理组和分流规则 |
 
 ![Override options](img/options-overview.png)
 
@@ -52,7 +52,7 @@ AI 平台（OpenAI、Anthropic 等）的风控系统会追踪 IP 指纹一致性
 
 ### 2B. Option B：完整链式代理
 
-打开 `家宽IP-链式代理.js`，在顶部 `MIYA_CREDENTIALS` 填入家宽 IP 服务的账号和端点信息：
+打开 `residential-chain-proxy-override.js`，在顶部 `MIYA_CREDENTIALS` 填入家宽 IP 服务的账号和端点信息：
 
 ```javascript
 var MIYA_CREDENTIALS = {
@@ -63,7 +63,7 @@ var MIYA_CREDENTIALS = {
 };
 ```
 
-在 Clash Party 覆写页只导入并启用 `家宽IP-链式代理.js`。它已经内置 DNS / Sniffer 逻辑，不需要再额外导入 `dns-sniffer-override.js`。
+在 Clash Party 覆写页只导入并启用 `residential-chain-proxy-override.js`。它已经内置 DNS / Sniffer 逻辑，不需要再额外导入 `dns-sniffer-override.js`。
 
 ### 3. 调整 `USER_OPTIONS`
 
@@ -119,7 +119,7 @@ Option B 会额外注入以下代理组：
 ### 升级 / 卸载
 
 - **升级 Option A**：重新下载 `dns-sniffer-override.js` 覆盖即可。
-- **升级 Option B**：重新下载 `家宽IP-链式代理.js` 覆盖即可，注意保留或重新填入顶部 `MIYA_CREDENTIALS`。脚本是幂等的，重复运行不会产生重复组。
+- **升级 Option B**：重新下载 `residential-chain-proxy-override.js` 覆盖即可，注意保留或重新填入顶部 `MIYA_CREDENTIALS`。脚本是幂等的，重复运行不会产生重复组。
 - **卸载**：关掉相关覆写，刷新订阅即可还原。
 
 ## Testing
@@ -139,7 +139,7 @@ node tests/validate.js
 三层流水线：**输入 → 策略 → 配置**。两种 Option 共享同一套 DNS / Sniffer POLICY：
 
 - `dns-sniffer-override.js` 只消费 `DERIVED` 写入 `config.dns` / `config.sniffer`。
-- `家宽IP-链式代理.js` 先写入 `config.dns` / `config.sniffer`，再把顶部 `MIYA_CREDENTIALS` 临时注入为内部凭证，最后消费同一份 `DERIVED` 写入分流规则并删除临时字段。
+- `residential-chain-proxy-override.js` 先写入 `config.dns` / `config.sniffer`，再把顶部 `MIYA_CREDENTIALS` 临时注入为内部凭证，最后消费同一份 `DERIVED` 写入分流规则并删除临时字段。
 
 | 模块 | 说明 |
 |---|---|

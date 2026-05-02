@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 
-const unifiedScriptPath = path.join(__dirname, "..", "src", "家宽IP-链式代理.js");
+const unifiedScriptPath = path.join(__dirname, "..", "src", "residential-chain-proxy-override.js");
 const standaloneDnsSnifferScriptPath = path.join(__dirname, "..", "src", "dns-sniffer-override.js");
 const unifiedScriptCode = fs.readFileSync(unifiedScriptPath, "utf8");
 const standaloneDnsSnifferScriptCode = fs.readFileSync(standaloneDnsSnifferScriptPath, "utf8");

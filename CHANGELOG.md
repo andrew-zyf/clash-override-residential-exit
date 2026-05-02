@@ -4,6 +4,13 @@
 
 ---
 
+## v11.2 (2026-05-02)
+
+- 将完整链式代理脚本从中文文件名改为 `src/residential-chain-proxy-override.js`。
+- 同步 README、测试和脚本版本号，仓库内两个 JS 入口均使用英文命名。
+
+---
+
 ## v11.1 (2026-05-02)
 
 - 新增 `src/dns-sniffer-override.js`，作为独立 DNS / Sniffer 选项；它只写入 `config.dns` / `config.sniffer`，不改代理组、不改分流规则。
@@ -15,7 +22,7 @@
 
 ## v11.0 (2026-05-02)
 
-- 将 `DNS解析和域名嗅探.js`、`MiyaIP 凭证_样本.js`、`家宽IP-链式代理.js` 合并为单一入口 `家宽IP-链式代理.js`。
+- 将 `DNS解析和域名嗅探.js`、`MiyaIP 凭证_样本.js`、`residential-chain-proxy-override.js` 合并为单一入口 `residential-chain-proxy-override.js`。
 - 新增顶部 `MIYA_CREDENTIALS` 配置块；脚本运行时临时写入凭证并在生成最终配置前删除，避免凭证泄漏到 Clash 配置。
 - DNS / Sniffer 逻辑改为内部模块，仍与路由规则共享同一份 POLICY / DERIVED 派生结果，保持域内、域外解析策略一致。
 - `tests/validate.js` 改为只加载单文件脚本，并新增空凭证校验；README 改为单文件导入流程。

@@ -8,7 +8,7 @@
 // 使用方式：只导入本文件；先在 MIYA_CREDENTIALS 填入真实凭证。
 // 兼容性：Clash Party 的 JavaScriptCore；只用 ES5 语法。
 //
-// @version 11.1
+// @version 11.2
 
 // ---------------------------------------------------------------------------
 // 用户可调参数
@@ -1415,7 +1415,7 @@ function buildSnifferConfig(derived) {
 // ---------------------------------------------------------------------------
 
 var CHAIN_PROXY_STATE_KEY = "_azChainProxyState";
-var CHAIN_PROXY_STATE_VERSION = "11.1";
+var CHAIN_PROXY_STATE_VERSION = "11.2";
 
 function buildChainProxyState(derived) {
   return {
@@ -2111,7 +2111,7 @@ function validateManagedRouting(config, routingTargets, derived) {
 // ---------------------------------------------------------------------------
 
 var CHAIN_PROXY_STATE_KEY = "_azChainProxyState";
-var CHAIN_PROXY_STATE_VERSION = "11.1";
+var CHAIN_PROXY_STATE_VERSION = "11.2";
 
 function buildChainProxyStateForOverride(derived) {
   return {
