@@ -4,6 +4,15 @@
 
 ---
 
+## v11.1 (2026-05-02)
+
+- 新增 `src/dns-sniffer-override.js`，作为独立 DNS / Sniffer 选项；它只写入 `config.dns` / `config.sniffer`，不改代理组、不改分流规则。
+- README 改为 Option A（独立 DNS / Sniffer）与 Option B（完整链式代理）两条路径，方便用户按风险和部署复杂度选择。
+- 使用 gpt-image-2 重新生成 README 配图，并统一替换为英文文件名：`hero-cover.png`、`options-overview.png`、`proxy-groups-overview.png`、`architecture-flow.png`。
+- 丢弃旧版中文命名插图和旧 `data-flow.png`，测试新增独立 DNS / Sniffer 覆写校验。
+
+---
+
 ## v11.0 (2026-05-02)
 
 - 将 `DNS解析和域名嗅探.js`、`MiyaIP 凭证_样本.js`、`家宽IP-链式代理.js` 合并为单一入口 `家宽IP-链式代理.js`。

@@ -4,7 +4,9 @@ const path = require("path");
 const vm = require("vm");
 
 const unifiedScriptPath = path.join(__dirname, "..", "src", "家宽IP-链式代理.js");
+const standaloneDnsSnifferScriptPath = path.join(__dirname, "..", "src", "dns-sniffer-override.js");
 const unifiedScriptCode = fs.readFileSync(unifiedScriptPath, "utf8");
+const standaloneDnsSnifferScriptCode = fs.readFileSync(standaloneDnsSnifferScriptPath, "utf8");
 
 const TEST_MIYA_CREDENTIALS = {
   username: "user",
@@ -26,6 +28,10 @@ function loadScriptSandbox(scriptCode, scriptPath) {
 
 function loadChainProxySandbox() {
   return loadScriptSandbox(unifiedScriptCode, unifiedScriptPath);
+}
+
+function loadStandaloneDnsSnifferSandbox() {
+  return loadScriptSandbox(standaloneDnsSnifferScriptCode, standaloneDnsSnifferScriptPath);
 }
 
 function cloneJson(value) {
@@ -389,6 +395,25 @@ function testRequiresConfiguredMiyaCredentials() {
   assert.throws(() => sandbox.main(createBaseConfig()), /MIYA_CREDENTIALS/);
 }
 
+function testStandaloneDnsSnifferOnly() {
+  const sandbox = loadStandaloneDnsSnifferSandbox();
+  const config = createBaseConfig();
+  const inputRules = config.rules.slice();
+  const output = sandbox.main(config);
+  const dnsBase = sandbox.DNS_SNIFFER_MODULE.BASE.dns;
+
+  assert.deepEqual(output.rules, inputRules);
+  assert.strictEqual(output._miya, undefined);
+  assert.strictEqual(output._azChainProxyState, undefined);
+  assert.strictEqual(output.dns.enable, true);
+  assert.strictEqual(output.sniffer.enable, true);
+  assertNameserverPolicyValues(output, ["+.docs.qq.com", "+.aliyuncs.com"], dnsBase.domestic);
+  assertNameserverPolicyValues(output, ["+.chatgpt.com", "+.claude.ai", "+.githubusercontent.com"], dnsBase.overseas);
+  assertIncludes(output.dns["fake-ip-filter"], ["+.push.apple.com", "stun.*.*"], "standalone fake-ip-filter");
+  assertIncludes(output.sniffer["force-domain"], ["+.claude.ai", "+.google.com"], "standalone sniffer.force-domain");
+  assertIncludes(output.sniffer["skip-domain"], ["+.push.apple.com", "+.tailscale.com"], "standalone sniffer.skip-domain");
+}
+
 function testDisableBrowserProcessProxy() {
   const { sandbox, state, output } = runMain(null, (sb) => {
     sb.USER_OPTIONS.routeBrowserToChain = false;
@@ -532,6 +557,7 @@ function testRepeatedRunDoesNotCreateSelfReference() {
 const tests = [
   testDefaultConfig,
   testRequiresConfiguredMiyaCredentials,
+  testStandaloneDnsSnifferOnly,
   testDisableBrowserProcessProxy,
   testAiCliProcessProxyDefaultsOn,
   testAiCliProcessProxyAlwaysOn,
