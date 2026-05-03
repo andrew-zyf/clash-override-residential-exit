@@ -4,9 +4,7 @@ const path = require("path");
 const vm = require("vm");
 
 const unifiedScriptPath = path.join(__dirname, "..", "src", "residential-chain-proxy-override.js");
-const standaloneDnsSnifferScriptPath = path.join(__dirname, "..", "src", "dns-sniffer-override.js");
 const unifiedScriptCode = fs.readFileSync(unifiedScriptPath, "utf8");
-const standaloneDnsSnifferScriptCode = fs.readFileSync(standaloneDnsSnifferScriptPath, "utf8");
 
 const TEST_MIYA_CREDENTIALS = {
   username: "user",
@@ -28,10 +26,6 @@ function loadScriptSandbox(scriptCode, scriptPath) {
 
 function loadChainProxySandbox() {
   return loadScriptSandbox(unifiedScriptCode, unifiedScriptPath);
-}
-
-function loadStandaloneDnsSnifferSandbox() {
-  return loadScriptSandbox(standaloneDnsSnifferScriptCode, standaloneDnsSnifferScriptPath);
 }
 
 function cloneJson(value) {
@@ -395,13 +389,19 @@ function testRequiresConfiguredMiyaCredentials() {
   assert.throws(() => sandbox.main(createBaseConfig()), /MIYA_CREDENTIALS/);
 }
 
-function testStandaloneDnsSnifferOnly() {
-  const sandbox = loadStandaloneDnsSnifferSandbox();
+function testUnifiedDnsSnifferOnlyMode() {
+  const sandbox = loadChainProxySandbox();
+  sandbox.USER_OPTIONS.overrideMode = "dns-sniffer-only";
   const config = createBaseConfig();
+  config._miya = cloneJson(TEST_MIYA_CREDENTIALS);
+  const inputProxies = cloneJson(config.proxies);
+  const inputProxyGroups = cloneJson(config["proxy-groups"]);
   const inputRules = config.rules.slice();
   const output = sandbox.main(config);
   const dnsBase = sandbox.DNS_SNIFFER_MODULE.BASE.dns;
 
+  assert.deepEqual(output.proxies, inputProxies);
+  assert.deepEqual(output["proxy-groups"], inputProxyGroups);
   assert.deepEqual(output.rules, inputRules);
   assert.strictEqual(output._miya, undefined);
   assert.strictEqual(output._azChainProxyState, undefined);
@@ -409,9 +409,9 @@ function testStandaloneDnsSnifferOnly() {
   assert.strictEqual(output.sniffer.enable, true);
   assertNameserverPolicyValues(output, ["+.docs.qq.com", "+.aliyuncs.com"], dnsBase.domestic);
   assertNameserverPolicyValues(output, ["+.chatgpt.com", "+.claude.ai", "+.githubusercontent.com"], dnsBase.overseas);
-  assertIncludes(output.dns["fake-ip-filter"], ["+.push.apple.com", "stun.*.*"], "standalone fake-ip-filter");
-  assertIncludes(output.sniffer["force-domain"], ["+.claude.ai", "+.google.com"], "standalone sniffer.force-domain");
-  assertIncludes(output.sniffer["skip-domain"], ["+.push.apple.com", "+.tailscale.com"], "standalone sniffer.skip-domain");
+  assertIncludes(output.dns["fake-ip-filter"], ["+.push.apple.com", "stun.*.*"], "dns-only fake-ip-filter");
+  assertIncludes(output.sniffer["force-domain"], ["+.claude.ai", "+.google.com"], "dns-only sniffer.force-domain");
+  assertIncludes(output.sniffer["skip-domain"], ["+.push.apple.com", "+.tailscale.com"], "dns-only sniffer.skip-domain");
 }
 
 function testDisableBrowserProcessProxy() {
@@ -557,7 +557,7 @@ function testRepeatedRunDoesNotCreateSelfReference() {
 const tests = [
   testDefaultConfig,
   testRequiresConfiguredMiyaCredentials,
-  testStandaloneDnsSnifferOnly,
+  testUnifiedDnsSnifferOnlyMode,
   testDisableBrowserProcessProxy,
   testAiCliProcessProxyDefaultsOn,
   testAiCliProcessProxyAlwaysOn,

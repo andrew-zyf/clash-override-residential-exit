@@ -1,14 +1,15 @@
 // 家宽 IP 链式代理一体化覆写脚本
 //
-// 单文件完成三件事：
-//   1. 写入 DNS / Sniffer，确保域内、域外网站按正确 DoH 分区解析。
-//   2. 注入 MiyaIP 家宽出口与官方中转节点。
-//   3. 写入链式代理、媒体分离、直连和兜底分流规则。
+// 单文件按模式完成覆写：
+//   1. dns-sniffer-only：只写入 DNS / Sniffer，保留原有代理组和规则。
+//   2. merged：写入 DNS / Sniffer，注入 MiyaIP 节点，并写入链式代理、
+//      媒体分离、直连和兜底分流规则。
 //
-// 使用方式：只导入本文件；先在 MIYA_CREDENTIALS 填入真实凭证。
+// 使用方式：只导入本文件；通过 USER_OPTIONS.overrideMode 选择只写 DNS/Sniffer
+// 或完整启用链式代理。完整模式需先在 MIYA_CREDENTIALS 填入真实凭证。
 // 兼容性：Clash Party 的 JavaScriptCore；只用 ES5 语法。
 //
-// @version 11.2
+// @version 11.3
 
 // ---------------------------------------------------------------------------
 // 用户可调参数
@@ -28,6 +29,7 @@ var MIYA_CREDENTIALS = {
 };
 
 var USER_OPTIONS = {
+  overrideMode: "merged", // merged = DNS/Sniffer + 链式/媒体分流；dns-sniffer-only = 只写 DNS/Sniffer
   chainRegion: "SG", // AI 家宽出口前一跳地区，可选 US / JP / HK / SG / TW
   routeBrowserToChain: true // 是否让 AI 浏览器按应用名继续强制走 chainRegion
 };
@@ -1415,7 +1417,7 @@ function buildSnifferConfig(derived) {
 // ---------------------------------------------------------------------------
 
 var CHAIN_PROXY_STATE_KEY = "_azChainProxyState";
-var CHAIN_PROXY_STATE_VERSION = "11.2";
+var CHAIN_PROXY_STATE_VERSION = "11.3";
 
 function buildChainProxyState(derived) {
   return {
@@ -2111,7 +2113,7 @@ function validateManagedRouting(config, routingTargets, derived) {
 // ---------------------------------------------------------------------------
 
 var CHAIN_PROXY_STATE_KEY = "_azChainProxyState";
-var CHAIN_PROXY_STATE_VERSION = "11.2";
+var CHAIN_PROXY_STATE_VERSION = "11.3";
 
 function buildChainProxyStateForOverride(derived) {
   return {
@@ -2233,6 +2235,41 @@ function cloneMiyaCredentials(credentials) {
   };
 }
 
+function normalizeOverrideMode(mode) {
+  if (mode === undefined || mode === null || mode === "") return "merged";
+  if (typeof mode !== "string") {
+    throw createUserError("USER_OPTIONS.overrideMode 必须是字符串");
+  }
+
+  var normalizedMode = mode.toLowerCase();
+  if (
+    normalizedMode === "merged" ||
+    normalizedMode === "option-b" ||
+    normalizedMode === "optionb" ||
+    normalizedMode === "full" ||
+    normalizedMode === "chain"
+  ) {
+    return "merged";
+  }
+  if (
+    normalizedMode === "dns-sniffer-only" ||
+    normalizedMode === "dns-sniffer" ||
+    normalizedMode === "dns" ||
+    normalizedMode === "option-a" ||
+    normalizedMode === "optiona"
+  ) {
+    return "dns-sniffer-only";
+  }
+
+  throw createUserError(
+    "未知 USER_OPTIONS.overrideMode: " + mode + "，可选 merged / dns-sniffer-only"
+  );
+}
+
+function shouldApplyOnlyDnsAndSniffer() {
+  return normalizeOverrideMode(USER_OPTIONS.overrideMode) === "dns-sniffer-only";
+}
+
 function resolveConfiguredMiyaCredentials(config) {
   if (hasConfiguredMiyaCredentials(MIYA_CREDENTIALS)) {
     return cloneMiyaCredentials(MIYA_CREDENTIALS);
@@ -2247,6 +2284,11 @@ function resolveConfiguredMiyaCredentials(config) {
 
 function main(config) {
   DNS_SNIFFER_MODULE.apply(config);
+  if (shouldApplyOnlyDnsAndSniffer()) {
+    delete config._miya;
+    return config;
+  }
+
   config._miya = resolveConfiguredMiyaCredentials(config);
   return applyChainProxy(config, DNS_SNIFFER_MODULE.DERIVED);
 }

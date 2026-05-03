@@ -4,6 +4,15 @@
 
 ---
 
+## v11.3 (2026-05-03)
+
+- 将 Option A / Option B 收敛到单一入口 `src/residential-chain-proxy-override.js`，由 `USER_OPTIONS.overrideMode` 选择 `dns-sniffer-only` 或 `merged`。
+- `dns-sniffer-only` 只写入 `config.dns` / `config.sniffer`，不会读取 `MIYA_CREDENTIALS`，也不会改动 `proxies` / `proxy-groups` / `rules`。
+- 移除独立 `src/dns-sniffer-override.js`，避免同时导入两个覆写入口造成配置边界不清。
+- README 和测试改为围绕单文件模式开关描述与校验。
+
+---
+
 ## v11.2 (2026-05-02)
 
 - 将完整链式代理脚本从中文文件名改为 `src/residential-chain-proxy-override.js`。

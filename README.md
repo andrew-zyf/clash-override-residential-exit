@@ -8,7 +8,7 @@ AI 平台（OpenAI、Anthropic 等）的风控系统会追踪 IP 指纹一致性
 
 本脚本的解决方案：**机场节点提供速度，家宽 IP 提供纯净出口**，通过三层防泄漏机制确保所有 AI 相关流量（含登录验证、支付、遥测）始终从同一个家宽 IP 出站。
 
-**当前版本：** v11.2
+**当前版本：** v11.3
 
 ## Features
 
@@ -23,36 +23,48 @@ AI 平台（OpenAI、Anthropic 等）的风控系统会追踪 IP 指纹一致性
 
 - [Clash Party](https://github.com/clash-verge-rev/clash-verge-rev) 或其他兼容 JavaScriptCore 覆写的 Clash 客户端
 - 一份代理订阅，至少包含 `US / JP / HK / SG / TW` 任一个地区的节点
-- Option B 需要一份家宽 IP 服务（作链式代理的前置出口）
+- `overrideMode: "merged"` 需要一份家宽 IP 服务（作链式代理的前置出口）
 - Node.js（仅 `tests/validate.js` 用，不是运行时依赖）
 
 示例资源（可选）：代理订阅 [办公娱乐好帮手](https://xn--9kq10e0y7h.site/index.html?register=twb6RIec) · 家宽 IP [MiyaIP](https://www.miyaip.com/?invitecode=7670643)
 
 ## Usage
 
-### 1. 选择使用模式
+### 1. 下载单一覆写脚本
 
-| 选项 | 脚本 | 适合场景 | 行为边界 |
-|---|---|---|---|
-| Option A：独立 DNS / Sniffer | [`src/dns-sniffer-override.js`](src/dns-sniffer-override.js) | 只想改善域内 / 域外 DNS 解析、Fake-IP 和域名嗅探，不想改现有代理组和分流规则 | 只写 `config.dns` / `config.sniffer`，不注入代理节点，不改 `rules` |
-| Option B：完整链式代理 | [`src/residential-chain-proxy-override.js`](src/residential-chain-proxy-override.js) | 需要把 AI、开发平台、支付 / 验证 / 遥测统一锁定到家宽出口，同时保留媒体分离和域内直连 | 写入 DNS / Sniffer、MiyaIP 节点、代理组和分流规则 |
+只需要导入一个文件：
+
+- [`src/residential-chain-proxy-override.js`](src/residential-chain-proxy-override.js) — 统一覆写入口，内置 DNS / Sniffer、链式代理和媒体分流逻辑
 
 ![Override options](img/options-overview.png)
 
-### 2A. Option A：独立 DNS / Sniffer
+### 2. 选择 `overrideMode`
 
-在 Clash Party 覆写页只导入并启用 `dns-sniffer-override.js`。这个脚本不需要家宽 IP 凭证，也不会改动订阅原有代理组和分流规则。
+打开 `residential-chain-proxy-override.js`，先改顶部 `USER_OPTIONS.overrideMode`：
 
-适合先做低风险验证：
+```javascript
+var USER_OPTIONS = {
+  overrideMode: "merged",      // merged 或 dns-sniffer-only
+  chainRegion: "SG",           // AI 家宽出口前一跳地区
+  routeBrowserToChain: true    // AI 浏览器按进程名是否也走 chainRegion
+};
+```
+
+| 模式 | 适合场景 | 行为边界 |
+|---|---|---|
+| `dns-sniffer-only` | 只想改善域内 / 域外 DNS 解析、Fake-IP 和域名嗅探，不想改现有代理组和分流规则 | 只写 `config.dns` / `config.sniffer`；不读取 `MIYA_CREDENTIALS`，不注入代理节点，不改 `proxies` / `proxy-groups` / `rules` |
+| `merged` | 需要把 AI、开发平台、支付 / 验证 / 遥测统一锁定到家宽出口，同时保留媒体分离和域内直连 | 先写 DNS / Sniffer，再写 MiyaIP 节点、代理组和分流规则 |
+
+`dns-sniffer-only` 适合先做低风险验证：
 
 - 域内站点绑定域内 DoH：`dns.alidns.com` / `doh.pub`
 - 域外站点绑定域外 DoH：`dns.google` / `cloudflare-dns.com`
 - 开启 Fake-IP、`fallback-filter`、TLS / HTTP / QUIC Sniffer
 - 对 Tailscale / Plex / Apple Push / 局域网等保留 `skip-domain`
 
-### 2B. Option B：完整链式代理
+### 3. 填写家宽凭证
 
-打开 `residential-chain-proxy-override.js`，在顶部 `MIYA_CREDENTIALS` 填入家宽 IP 服务的账号和端点信息：
+只有 `overrideMode: "merged"` 需要在顶部 `MIYA_CREDENTIALS` 填入家宽 IP 服务的账号和端点信息；`dns-sniffer-only` 可以保持空值。
 
 ```javascript
 var MIYA_CREDENTIALS = {
@@ -63,18 +75,7 @@ var MIYA_CREDENTIALS = {
 };
 ```
 
-在 Clash Party 覆写页只导入并启用 `residential-chain-proxy-override.js`。它已经内置 DNS / Sniffer 逻辑，不需要再额外导入 `dns-sniffer-override.js`。
-
-### 3. 调整 `USER_OPTIONS`
-
-同一文件顶部保留两个行为开关：
-
-```javascript
-var USER_OPTIONS = {
-  chainRegion: "SG",           // AI 家宽出口前一跳地区
-  routeBrowserToChain: true    // AI 浏览器按进程名是否也走 chainRegion
-};
-```
+### 4. 调整链式代理选项
 
 | 场景 | 配置 |
 |---|---|
@@ -88,11 +89,11 @@ var USER_OPTIONS = {
 - 链式出口：`SG → TW → JP → US`
 - 媒体/其它分组：全部 5 个地区自动生成，默认优先 US
 
-### 4. 启用
+### 5. 启用
 
-启用所选覆写 → 切到机场订阅 → 启动代理（**规则模式** + **TUN 模式**）。不要选中 Clash Party 原生的「DNS 覆写」和「嗅探覆写」选项，脚本已通过 POLICY 统一接管 DNS 和 Sniffer 配置。
+在 Clash Party 覆写页只导入并启用 `residential-chain-proxy-override.js` → 切到机场订阅 → 启动代理（**规则模式** + **TUN 模式**）。不要选中 Clash Party 原生的「DNS 覆写」和「嗅探覆写」选项，脚本已通过 POLICY 统一接管 DNS 和 Sniffer 配置。
 
-Option B 会额外注入以下代理组：
+`overrideMode: "merged"` 会额外注入以下代理组：
 
 | 代理组名称 | 类型 | 说明 |
 |---|---|---|
@@ -112,14 +113,14 @@ Option B 会额外注入以下代理组：
 
 ### FAQ
 
-- **Option A 也需要填 `MIYA_CREDENTIALS` 吗？** 不需要。Option A 只接管 DNS / Sniffer，不碰家宽链路。
-- **Option B 报错 `请先在本脚本顶部 MIYA_CREDENTIALS 填写...`** — 凭证仍是空值。填入 MiyaIP 用户名、密码、家宽出口和官方中转端点。
+- **只想启用 DNS / Sniffer 怎么配？** 把 `USER_OPTIONS.overrideMode` 改成 `"dns-sniffer-only"`，只导入这一份脚本即可。此模式不会读取家宽凭证，也不会改代理组或规则。
+- **完整链式代理怎么配？** 使用 `overrideMode: "merged"`，并填入 `MIYA_CREDENTIALS`。脚本会先接管 DNS / Sniffer，再注入链式代理和媒体分流规则。
+- **`merged` 报错 `请先在本脚本顶部 MIYA_CREDENTIALS 填写...`** — 凭证仍是空值。填入 MiyaIP 用户名、密码、家宽出口和官方中转端点。
 - **报错 `未找到可用的 chainRegion 节点`** — 订阅中没有可识别的目标地区节点。确认至少有一个 `US / JP / HK / SG / TW` 节点，且节点名能被 `BASE.regions[XX].regex` 匹配（默认识别国旗 emoji、中文地区名、`US-` / `JP-` 等前缀）。
 
 ### 升级 / 卸载
 
-- **升级 Option A**：重新下载 `dns-sniffer-override.js` 覆盖即可。
-- **升级 Option B**：重新下载 `residential-chain-proxy-override.js` 覆盖即可，注意保留或重新填入顶部 `MIYA_CREDENTIALS`。脚本是幂等的，重复运行不会产生重复组。
+- **升级**：重新下载 `residential-chain-proxy-override.js` 覆盖即可，注意保留或重新填入顶部 `USER_OPTIONS` / `MIYA_CREDENTIALS`。脚本是幂等的，重复运行不会产生重复组。
 - **卸载**：关掉相关覆写，刷新订阅即可还原。
 
 ## Testing
@@ -128,7 +129,7 @@ Option B 会额外注入以下代理组：
 node tests/validate.js
 ```
 
-使用 `vm` 隔离加载脚本，覆盖独立 DNS / Sniffer、完整链式代理、凭证校验、地区 fallback、开关组合、缺失地区报错、幂等重跑、受管对象修复等 15 个用例。
+使用 `vm` 隔离加载单一脚本，覆盖 `dns-sniffer-only`、`merged`、凭证校验、地区 fallback、开关组合、缺失地区报错、幂等重跑、受管对象修复等 15 个用例。
 
 ## Architecture
 
@@ -136,16 +137,16 @@ node tests/validate.js
 
 ![Architecture flow](img/architecture-flow.png)
 
-三层流水线：**输入 → 策略 → 配置**。两种 Option 共享同一套 DNS / Sniffer POLICY：
+三层流水线：**输入 → 策略 → 配置**。单一脚本用 `USER_OPTIONS.overrideMode` 控制执行边界：
 
-- `dns-sniffer-override.js` 只消费 `DERIVED` 写入 `config.dns` / `config.sniffer`。
-- `residential-chain-proxy-override.js` 先写入 `config.dns` / `config.sniffer`，再把顶部 `MIYA_CREDENTIALS` 临时注入为内部凭证，最后消费同一份 `DERIVED` 写入分流规则并删除临时字段。
+- `dns-sniffer-only` 只消费 `DERIVED` 写入 `config.dns` / `config.sniffer`，随后直接返回配置。
+- `merged` 先写入 `config.dns` / `config.sniffer`，再把顶部 `MIYA_CREDENTIALS` 临时注入为内部凭证，最后消费同一份 `DERIVED` 写入分流规则并删除临时字段。
 
 | 模块 | 说明 |
 |---|---|
-| `DNS_SNIFFER_MODULE` | DNS / Sniffer 策略模块，两种 Option 共用 |
+| `DNS_SNIFFER_MODULE` | DNS / Sniffer 策略模块，两种模式共用 |
 | `MIYA_CREDENTIALS` | MiyaIP 用户名、密码、家宽出口和官方中转端点 |
-| `USER_OPTIONS` | 地区选择 + 浏览器开关 |
+| `USER_OPTIONS` | 模式选择 + 地区选择 + 浏览器开关 |
 | `BASE` | 运行期常量：地区表、节点名、组名、DoH 服务器 |
 | `CHAIN` / `MEDIA` / `CDN` / `CN` / `OVERSEAS` / `LOCAL` / `NETWORK` | `+.domain` 域名模式，按路由意图分桶 |
 | `POLICY` | 单一权威表，每条 entry 声明 `route` / `dnsZone` / `sniffer` / `fakeIpBypass` / `fallbackFilter` |
