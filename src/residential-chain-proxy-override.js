@@ -9,35 +9,17 @@
 //   2. merged：写入 DNS / Sniffer，注入 MiyaIP 节点，并写入链式代理、
 //      媒体分离、直连和兜底分流规则。
 //
-// 为兼容测试和旧单文件用法，本文件保留内部默认 USER_OPTIONS / MIYA_CREDENTIALS。
 // 兼容性：Clash Party 的 JavaScriptCore；只用 ES5 语法。
 //
 // @version 11.4
 
 // ---------------------------------------------------------------------------
-// 内部默认参数（优先使用 config 文件传入的用户配置）
+// 用户配置传递状态
 // ---------------------------------------------------------------------------
 
-var MIYA_CREDENTIALS = {
-  username: "",
-  password: "",
-  relay: {
-    server: "",
-    port: 8022
-  },
-  transit: {
-    server: "",
-    port: 8001
-  }
-};
-
-var USER_OPTIONS = {
-  overrideMode: "merged", // merged = DNS/Sniffer + 链式/媒体分流；dns-sniffer-only = 只写 DNS/Sniffer
-  chainRegion: "SG", // AI 家宽出口前一跳地区，可选 US / JP / HK / SG / TW
-  routeBrowserToChain: true // 是否让 AI 浏览器按应用名继续强制走 chainRegion
-};
-
 var USER_CONFIG_STATE_KEY = "_azChainProxyUserConfig";
+var ACTIVE_USER_OPTIONS = null;
+var ACTIVE_MIYA_CREDENTIALS = null;
 
 // ---------------------------------------------------------------------------
 // DNS / Sniffer 策略模块
@@ -1552,7 +1534,7 @@ function createUserError(message) {
 
 // 是否让受管 AI 浏览器继续按应用名强制走 chainRegion。
 function shouldRouteBrowserToChain() {
-  return USER_OPTIONS.routeBrowserToChain !== false;
+  return ACTIVE_USER_OPTIONS.routeBrowserToChain !== false;
 }
 
 // ---------------------------------------------------------------------------
@@ -2237,7 +2219,7 @@ function applyChainProxy(config, derivedOverride) {
 
   routingTargets = resolveRoutingTargets(
     config,
-    USER_OPTIONS.chainRegion
+    ACTIVE_USER_OPTIONS.chainRegion
   ); // 解析链路目标
   writeManagedRouting(config, routingTargets, derived); // 写入拨号与规则
   validateManagedRouting(config, routingTargets, derived); // 校验关键目标
@@ -2297,15 +2279,21 @@ function hasUserConfig(config) {
 
 function hydrateUserConfig(config) {
   var userConfig;
-  if (!hasUserConfig(config)) return;
+  if (!hasUserConfig(config)) {
+    throw createUserError(
+      "缺少用户配置，请先导入 residential-chain-proxy-config.js，并确认它排在 residential-chain-proxy-override.js 前面"
+    );
+  }
 
   userConfig = config[USER_CONFIG_STATE_KEY];
-  if (userConfig.userOptions) {
-    USER_OPTIONS = cloneUserOptions(userConfig.userOptions);
+  if (!userConfig.userOptions) {
+    throw createUserError("用户配置缺少 USER_OPTIONS，请检查 residential-chain-proxy-config.js");
   }
-  if (userConfig.miyaCredentials) {
-    MIYA_CREDENTIALS = cloneMiyaCredentials(userConfig.miyaCredentials);
-  }
+
+  ACTIVE_USER_OPTIONS = cloneUserOptions(userConfig.userOptions);
+  ACTIVE_MIYA_CREDENTIALS = userConfig.miyaCredentials
+    ? cloneMiyaCredentials(userConfig.miyaCredentials)
+    : null;
 
   delete config[USER_CONFIG_STATE_KEY];
 }
@@ -2342,15 +2330,12 @@ function normalizeOverrideMode(mode) {
 }
 
 function shouldApplyOnlyDnsAndSniffer() {
-  return normalizeOverrideMode(USER_OPTIONS.overrideMode) === "dns-sniffer-only";
+  return normalizeOverrideMode(ACTIVE_USER_OPTIONS.overrideMode) === "dns-sniffer-only";
 }
 
 function resolveConfiguredMiyaCredentials(config) {
-  if (hasConfiguredMiyaCredentials(MIYA_CREDENTIALS)) {
-    return cloneMiyaCredentials(MIYA_CREDENTIALS);
-  }
-  if (hasConfiguredMiyaCredentials(config._miya)) {
-    return cloneMiyaCredentials(config._miya);
+  if (hasConfiguredMiyaCredentials(ACTIVE_MIYA_CREDENTIALS)) {
+    return cloneMiyaCredentials(ACTIVE_MIYA_CREDENTIALS);
   }
   throw createUserError(
     "请先在 residential-chain-proxy-config.js 填写 MiyaIP 用户名、密码、家宽出口和官方中转端点，并确认配置文件排在实现文件前面"

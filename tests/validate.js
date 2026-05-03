@@ -56,24 +56,11 @@ function createBaseConfig() {
   };
 }
 
-function runMain(configMutator, sandboxMutator) {
-  const config = createBaseConfig();
-  if (typeof configMutator === "function") configMutator(config);
-
-  const sandbox = loadChainProxySandbox();
-  sandbox.MIYA_CREDENTIALS = cloneJson(TEST_MIYA_CREDENTIALS);
-  if (typeof sandboxMutator === "function") sandboxMutator(sandbox);
-  return {
-    sandbox,
-    state: { derived: cloneJson(sandbox.DNS_SNIFFER_MODULE.DERIVED) },
-    dnsBase: cloneJson(sandbox.DNS_SNIFFER_MODULE.BASE.dns),
-    output: sandbox.main(config)
-  };
-}
-
 function runSplitMain(configMutator, configSandboxMutator, implementationSandboxMutator) {
-  const config = createBaseConfig();
-  if (typeof configMutator === "function") configMutator(config);
+  var config = createBaseConfig();
+  if (typeof configMutator === "function") {
+    config = configMutator(config) || config;
+  }
 
   const configSandbox = loadUserConfigSandbox();
   configSandbox.MIYA_CREDENTIALS = cloneJson(TEST_MIYA_CREDENTIALS);
@@ -95,6 +82,10 @@ function runSplitMain(configMutator, configSandboxMutator, implementationSandbox
   };
 }
 
+function runMain(configMutator, configSandboxMutator, implementationSandboxMutator) {
+  return runSplitMain(configMutator, configSandboxMutator, implementationSandboxMutator);
+}
+
 // ---------------------------------------------------------------------------
 // Derive canonical group names / process lists from sandbox metadata
 // ---------------------------------------------------------------------------
@@ -106,9 +97,8 @@ function regionGroupName(sandbox, regionKey, suffix) {
 
 function expectedGroupNames(sandbox) {
   const suffix = sandbox.BASE.groupNameSuffixes;
-  const opt = sandbox.USER_OPTIONS;
   return {
-    relay: regionGroupName(sandbox, opt.chainRegion, suffix.base),
+    relay: regionGroupName(sandbox, "SG", suffix.base),
     chainTarget: sandbox.BASE.chainGroupName,
     usRegion: regionGroupName(sandbox, "US", suffix.base)
   };
@@ -475,9 +465,9 @@ function assertDnsAndSniffer(output, dnsBase) {
 
 function testDefaultConfig() {
   const { sandbox, state, dnsBase, output } = runMain();
-  assert.strictEqual(sandbox.USER_OPTIONS.routeBrowserToChain, true);
   assert.strictEqual(output._miya, undefined);
   assert.strictEqual(output._azChainProxyState, undefined);
+  assert.strictEqual(output._azChainProxyUserConfig, undefined);
   assertManagedProxyTopology(output, sandbox);
   assertCoreStrictRouting(output, sandbox);
   assertMediaRouting(output, sandbox);
@@ -491,19 +481,38 @@ function testDefaultConfig() {
 }
 
 function testRequiresConfiguredMiyaCredentials() {
+  assert.throws(() => runMain(null, (configSandbox) => {
+    configSandbox.MIYA_CREDENTIALS = {
+      username: "",
+      password: "",
+      relay: { server: "", port: 8022 },
+      transit: { server: "", port: 8001 }
+    };
+  }), /MiyaIP/);
+}
+
+function testMissingUserConfigFails() {
   const sandbox = loadChainProxySandbox();
-  assert.throws(() => sandbox.main(createBaseConfig()), /residential-chain-proxy-config\.js/);
+  assert.throws(() => sandbox.main(createBaseConfig()), /缺少用户配置/);
 }
 
 function testUnifiedDnsSnifferOnlyMode() {
-  const sandbox = loadChainProxySandbox();
-  sandbox.USER_OPTIONS.overrideMode = "dns-sniffer-only";
   const config = createBaseConfig();
-  config._miya = cloneJson(TEST_MIYA_CREDENTIALS);
   const inputProxies = cloneJson(config.proxies);
   const inputProxyGroups = cloneJson(config["proxy-groups"]);
   const inputRules = config.rules.slice();
-  const output = sandbox.main(config);
+  const { sandbox, output } = runMain(
+    () => config,
+    (configSandbox) => {
+      configSandbox.USER_OPTIONS.overrideMode = "dns-sniffer-only";
+      configSandbox.MIYA_CREDENTIALS = {
+        username: "",
+        password: "",
+        relay: { server: "", port: 8022 },
+        transit: { server: "", port: 8001 }
+      };
+    }
+  );
   const dnsBase = sandbox.DNS_SNIFFER_MODULE.BASE.dns;
 
   assert.deepEqual(output.proxies, inputProxies);
@@ -557,11 +566,15 @@ function testOnlyAiAndBrowserProcessesAreManaged() {
 }
 
 function testMissingRegionFails() {
-  const sandbox = loadChainProxySandbox();
-  sandbox.MIYA_CREDENTIALS = cloneJson(TEST_MIYA_CREDENTIALS);
-  sandbox.USER_OPTIONS.chainRegion = "JP";
-  sandbox.BASE.regionFallbackOrder.chain = [];
-  assert.throws(() => sandbox.main(createBaseConfig()), /未找到可用的 chainRegion 节点/);
+  assert.throws(() => runMain(
+    null,
+    (configSandbox) => {
+      configSandbox.USER_OPTIONS.chainRegion = "JP";
+    },
+    (implementationSandbox) => {
+      implementationSandbox.BASE.regionFallbackOrder.chain = [];
+    }
+  ), /未找到可用的 chainRegion 节点/);
 }
 
 // testMissingMediaRegionFails removed – mediaRegion config no longer exists
@@ -581,16 +594,18 @@ function testChainRegionFallsBackToAvailableRegion() {
 // testMediaRegionFallsBackToAvailableRegion removed – mediaRegion config no longer exists
 
 function testMissingStrictTargetFails() {
-  const sandbox = loadChainProxySandbox();
-  sandbox.MIYA_CREDENTIALS = cloneJson(TEST_MIYA_CREDENTIALS);
-  const original = sandbox.resolveRoutingTargets;
-  sandbox.resolveRoutingTargets = (config, chainRegion) => {
-    const rt = original(config, chainRegion);
-    rt.strictAiTarget = "错误目标";
-    return rt;
-  };
-  assert.throws(() => sandbox.main(createBaseConfig()),
-    /域外 AI 与支撑平台未直接指向当前 chainRegion 出口/);
+  assert.throws(() => runMain(
+    null,
+    null,
+    (implementationSandbox) => {
+      const original = implementationSandbox.resolveRoutingTargets;
+      implementationSandbox.resolveRoutingTargets = (config, chainRegion) => {
+        const rt = original(config, chainRegion);
+        rt.strictAiTarget = "错误目标";
+        return rt;
+      };
+    }
+  ), /域外 AI 与支撑平台未直接指向当前 chainRegion 出口/);
 }
 
 function testExistingManagedObjectsAreReconciled() {
@@ -647,9 +662,7 @@ function testNodeSelectionKeepsOnlyCurrentRelayGroup() {
 function testRepeatedRunDoesNotCreateSelfReference() {
   const first = runMain();
   const rerunInput = JSON.parse(JSON.stringify(first.output));
-  const sandbox = loadChainProxySandbox();
-  sandbox.MIYA_CREDENTIALS = cloneJson(TEST_MIYA_CREDENTIALS);
-  const second = sandbox.main(rerunInput);
+  const { sandbox, output: second } = runMain(() => rerunInput);
   const names = expectedGroupNames(sandbox);
 
   assertManagedProxyTopology(second, sandbox);
@@ -708,6 +721,7 @@ function testSplitDnsSnifferOnlyModeDoesNotNeedCredentials() {
 const tests = [
   testDefaultConfig,
   testRequiresConfiguredMiyaCredentials,
+  testMissingUserConfigFails,
   testUnifiedDnsSnifferOnlyMode,
   testDisableBrowserProcessProxy,
   testAiCliProcessProxyDefaultsOn,
