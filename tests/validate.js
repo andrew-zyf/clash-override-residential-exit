@@ -5,6 +5,8 @@ const vm = require("vm");
 
 const unifiedScriptPath = path.join(__dirname, "..", "src", "residential-chain-proxy-override.js");
 const unifiedScriptCode = fs.readFileSync(unifiedScriptPath, "utf8");
+const userConfigScriptPath = path.join(__dirname, "..", "src", "residential-chain-proxy-config.js");
+const userConfigScriptCode = fs.readFileSync(userConfigScriptPath, "utf8");
 
 const TEST_MIYA_CREDENTIALS = {
   username: "user",
@@ -26,6 +28,10 @@ function loadScriptSandbox(scriptCode, scriptPath) {
 
 function loadChainProxySandbox() {
   return loadScriptSandbox(unifiedScriptCode, unifiedScriptPath);
+}
+
+function loadUserConfigSandbox() {
+  return loadScriptSandbox(userConfigScriptCode, userConfigScriptPath);
 }
 
 function cloneJson(value) {
@@ -62,6 +68,30 @@ function runMain(configMutator, sandboxMutator) {
     state: { derived: cloneJson(sandbox.DNS_SNIFFER_MODULE.DERIVED) },
     dnsBase: cloneJson(sandbox.DNS_SNIFFER_MODULE.BASE.dns),
     output: sandbox.main(config)
+  };
+}
+
+function runSplitMain(configMutator, configSandboxMutator, implementationSandboxMutator) {
+  const config = createBaseConfig();
+  if (typeof configMutator === "function") configMutator(config);
+
+  const configSandbox = loadUserConfigSandbox();
+  configSandbox.MIYA_CREDENTIALS = cloneJson(TEST_MIYA_CREDENTIALS);
+  if (typeof configSandboxMutator === "function") configSandboxMutator(configSandbox);
+  const configAfterUserConfig = configSandbox.main(config);
+
+  const implementationSandbox = loadChainProxySandbox();
+  assert.notStrictEqual(configSandbox, implementationSandbox);
+  if (typeof implementationSandboxMutator === "function") {
+    implementationSandboxMutator(implementationSandbox);
+  }
+
+  return {
+    configSandbox,
+    sandbox: implementationSandbox,
+    state: { derived: cloneJson(implementationSandbox.DNS_SNIFFER_MODULE.DERIVED) },
+    dnsBase: cloneJson(implementationSandbox.DNS_SNIFFER_MODULE.BASE.dns),
+    output: implementationSandbox.main(configAfterUserConfig)
   };
 }
 
@@ -121,6 +151,13 @@ function assertRulesExist(ruleLines, expected) {
 function assertRulesMissing(ruleLines, unexpected) {
   for (const line of unexpected) {
     assert(!ruleLines.includes(line), "Unexpected rule found: " + line);
+  }
+}
+
+function assertRuleIdentitiesMissing(ruleLines, unexpectedIdentities) {
+  const identities = ruleLines.map(ruleIdentity);
+  for (const identity of unexpectedIdentities) {
+    assert(!identities.includes(identity), "Unexpected rule identity found: " + identity);
   }
 }
 
@@ -291,11 +328,35 @@ function assertBrowserRouting(output, sandbox, state) {
 }
 
 function assertBrowserRoutingPriority(output, sandbox) {
-  const names = expectedGroupNames(sandbox);
   const browserRule = "PROCESS-NAME,Dia," + sandbox.UI_GROUPS.ai;
+  const aiAppRule = "PROCESS-NAME,Claude," + sandbox.UI_GROUPS.ai;
+  const aiCliRule = "PROCESS-NAME,codex," + sandbox.UI_GROUPS.ai;
+  const geositeCnRule = "GEOSITE,cn,DIRECT";
+  const geoipCnRule = "GEOIP,CN,DIRECT";
+  const matchRule = "MATCH,办公娱乐好帮手";
+
+  assertRulesExist(output.rules, [geositeCnRule, geoipCnRule]);
+
+  assertRuleAppearsBefore(output.rules, "DOMAIN-SUFFIX,claude.ai," + sandbox.UI_GROUPS.ai, geositeCnRule);
+  assertRuleAppearsBefore(output.rules, "DOMAIN-SUFFIX,youtube.com," + sandbox.UI_GROUPS.video, geositeCnRule);
+  assertRuleAppearsBefore(output.rules, "DOMAIN-SUFFIX,docs.qq.com,DIRECT", geositeCnRule);
+  assertRuleAppearsBefore(output.rules, geositeCnRule, geoipCnRule);
+
+  assertRuleAppearsBefore(output.rules, geositeCnRule, aiAppRule);
+  assertRuleAppearsBefore(output.rules, geoipCnRule, aiCliRule);
+  assertRuleAppearsBefore(output.rules, geositeCnRule, browserRule);
+  assertRuleAppearsBefore(output.rules, geoipCnRule, browserRule);
+
   assertRuleAppearsBefore(output.rules, "DOMAIN-SUFFIX,youtube.com," + sandbox.UI_GROUPS.video, browserRule);
   assertRuleAppearsBefore(output.rules, "DOMAIN-SUFFIX,tailscale.com,DIRECT", browserRule);
   assertRuleAppearsBefore(output.rules, "DOMAIN-SUFFIX,docs.qq.com,DIRECT", browserRule);
+  assertRuleAppearsBefore(output.rules, geositeCnRule, matchRule);
+  assertRuleAppearsBefore(output.rules, geoipCnRule, matchRule);
+
+  assertRulesMissing(output.rules, [
+    "DOMAIN-KEYWORD,stun," + sandbox.UI_GROUPS.ai,
+    "DOMAIN-KEYWORD,turn," + sandbox.UI_GROUPS.ai
+  ]);
 }
 
 function assertDomesticDirectCoverage(output, dnsBase) {
@@ -351,16 +412,61 @@ function assertOverseasDohDirectCoverage(output, dnsBase) {
 }
 
 function assertDnsAndSniffer(output, dnsBase) {
+  assertNameserverPolicyValues(output, [dnsBase.domesticGeosite], dnsBase.domestic);
+  assertNameserverPolicyValues(output, [dnsBase.overseasGeosite], dnsBase.overseas);
+  assert.strictEqual(output.dns["nameserver-policy"]["geosite:openai"], undefined);
+
   assertNameserverPolicyValues(
     output,
-    ["+.sora.com", "+.notebooklm.google", "+.m365.cloud.microsoft", "+.meta.ai"],
+    [
+      "+.openai.com",
+      "+.chatgpt.com",
+      "+.sora.com",
+      "+.oaiusercontent.com",
+      "+.oaistatic.com",
+      "+.claude.ai",
+      "+.anthropic.com",
+      "+.notebooklm.google",
+      "+.m365.cloud.microsoft",
+      "+.meta.ai"
+    ],
     dnsBase.overseas
   );
-  assertNameserverPolicyValues(output, ["+.push.apple.com"], dnsBase.domestic);
+  assertNameserverPolicyValues(
+    output,
+    ["+.push.apple.com", "+.cnnic.cn", "+.12306.cn"],
+    dnsBase.domestic
+  );
+  assertNameserverPolicyValues(output, ["+.iana.org", "+.ietf.org"], dnsBase.overseas);
+
   assertIncludes(output.dns["fake-ip-filter"], ["+.push.apple.com", "+.xboxlive.com", "stun.*.*"], "fake-ip-filter");
-  assertIncludes(output.dns["fallback-filter"].domain, ["+.sora.com", "+.youtube.com", "+.meta.ai"], "fallback-filter.domain");
-  assertIncludes(output.sniffer["force-domain"], ["+.claude.ai", "+.google.com"], "sniffer.force-domain");
-  assertIncludes(output.sniffer["skip-domain"], ["+.push.apple.com"], "sniffer.skip-domain");
+  assertIncludes(
+    output.dns["fallback-filter"].domain,
+    ["+.sora.com", "+.youtube.com", "+.meta.ai", "+.iana.org", "+.ietf.org"],
+    "fallback-filter.domain"
+  );
+  assertIncludes(
+    output.sniffer["force-domain"],
+    ["+.openai.com", "+.chatgpt.com", "+.claude.ai", "+.anthropic.com", "+.cloudflare.com"],
+    "sniffer.force-domain"
+  );
+  assertExcludes(
+    output.sniffer["force-domain"],
+    ["+", "geosite:cn", "geosite:geolocation-!cn", "geosite:openai"],
+    "sniffer.force-domain"
+  );
+  assertIncludes(
+    output.sniffer["skip-domain"],
+    ["+.push.apple.com", "+.tailscale.com", "+.plex.tv", "+.mineru.org.cn"],
+    "sniffer.skip-domain"
+  );
+
+  assertRuleIdentitiesMissing(output.rules, [
+    "DOMAIN-SUFFIX,cnnic.cn",
+    "DOMAIN-SUFFIX,12306.cn",
+    "DOMAIN-SUFFIX,iana.org",
+    "DOMAIN-SUFFIX,ietf.org"
+  ]);
 }
 
 // ---------------------------------------------------------------------------
@@ -386,7 +492,7 @@ function testDefaultConfig() {
 
 function testRequiresConfiguredMiyaCredentials() {
   const sandbox = loadChainProxySandbox();
-  assert.throws(() => sandbox.main(createBaseConfig()), /MIYA_CREDENTIALS/);
+  assert.throws(() => sandbox.main(createBaseConfig()), /residential-chain-proxy-config\.js/);
 }
 
 function testUnifiedDnsSnifferOnlyMode() {
@@ -407,6 +513,9 @@ function testUnifiedDnsSnifferOnlyMode() {
   assert.strictEqual(output._azChainProxyState, undefined);
   assert.strictEqual(output.dns.enable, true);
   assert.strictEqual(output.sniffer.enable, true);
+  assertNameserverPolicyValues(output, [dnsBase.domesticGeosite], dnsBase.domestic);
+  assertNameserverPolicyValues(output, [dnsBase.overseasGeosite], dnsBase.overseas);
+  assert.strictEqual(output.dns["nameserver-policy"]["geosite:openai"], undefined);
   assertNameserverPolicyValues(output, ["+.docs.qq.com", "+.aliyuncs.com"], dnsBase.domestic);
   assertNameserverPolicyValues(output, ["+.chatgpt.com", "+.claude.ai", "+.githubusercontent.com"], dnsBase.overseas);
   assertIncludes(output.dns["fake-ip-filter"], ["+.push.apple.com", "stun.*.*"], "dns-only fake-ip-filter");
@@ -550,6 +659,48 @@ function testRepeatedRunDoesNotCreateSelfReference() {
   }
 }
 
+function testSplitConfigAndImplementationMode() {
+  const { sandbox, dnsBase, output } = runSplitMain(null, (configSandbox) => {
+    configSandbox.USER_OPTIONS.chainRegion = "US";
+    configSandbox.USER_OPTIONS.routeBrowserToChain = false;
+  });
+  const suffix = sandbox.BASE.groupNameSuffixes;
+  const usRelay = regionGroupName(sandbox, "US", suffix.base);
+
+  assert.strictEqual(output._miya, undefined);
+  assert.strictEqual(output._azChainProxyUserConfig, undefined);
+  assert.strictEqual(findProxy(output, sandbox.BASE.nodeNames.relay)["dialer-proxy"], usRelay);
+  assertNameserverPolicyValues(output, [dnsBase.domesticGeosite], dnsBase.domestic);
+  assertProcessRules(output, false, derivedBrowserProcessNames({ derived: sandbox.DNS_SNIFFER_MODULE.DERIVED }), sandbox.UI_GROUPS.ai);
+}
+
+function testSplitDnsSnifferOnlyModeDoesNotNeedCredentials() {
+  const config = createBaseConfig();
+  const inputProxies = cloneJson(config.proxies);
+  const inputProxyGroups = cloneJson(config["proxy-groups"]);
+  const inputRules = config.rules.slice();
+
+  const configSandbox = loadUserConfigSandbox();
+  configSandbox.USER_OPTIONS.overrideMode = "dns-sniffer-only";
+  configSandbox.MIYA_CREDENTIALS = {
+    username: "",
+    password: "",
+    relay: { server: "", port: 8022 },
+    transit: { server: "", port: 8001 }
+  };
+
+  const implementationSandbox = loadChainProxySandbox();
+  const output = implementationSandbox.main(configSandbox.main(config));
+
+  assert.deepEqual(output.proxies, inputProxies);
+  assert.deepEqual(output["proxy-groups"], inputProxyGroups);
+  assert.deepEqual(output.rules, inputRules);
+  assert.strictEqual(output._miya, undefined);
+  assert.strictEqual(output._azChainProxyUserConfig, undefined);
+  assert.strictEqual(output.dns.enable, true);
+  assert.strictEqual(output.sniffer.enable, true);
+}
+
 // ---------------------------------------------------------------------------
 // Runner
 // ---------------------------------------------------------------------------
@@ -569,7 +720,9 @@ const tests = [
   testChainGroupIsNotReusedAsRelayTarget,
   testBadExternalRegionGroupIsNotReused,
   testNodeSelectionKeepsOnlyCurrentRelayGroup,
-  testRepeatedRunDoesNotCreateSelfReference
+  testRepeatedRunDoesNotCreateSelfReference,
+  testSplitConfigAndImplementationMode,
+  testSplitDnsSnifferOnlyModeDoesNotNeedCredentials
 ];
 
 for (const test of tests) {

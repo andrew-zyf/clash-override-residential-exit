@@ -4,6 +4,16 @@
 
 ---
 
+## v11.4 (2026-05-03)
+
+- 拆分用户配置与实现逻辑：新增 `src/residential-chain-proxy-config.js` 保存 `MIYA_CREDENTIALS` / `USER_OPTIONS`，`src/residential-chain-proxy-override.js` 读取临时配置后立即清理，升级实现文件时可保留本地配置。
+- DNS 策略改为 `geosite:cn` / `geosite:geolocation-!cn` 大类兜底 + 显式域名覆盖；移除 `geosite:openai`，OpenAI / Claude 等高敏域名全部由源码显式维护。
+- 分流策略改为域名优先、进程兜底：高敏域名、媒体、DoH、显式 DIRECT 先匹配，再用 `GEOSITE,cn,DIRECT` / `GEOIP,CN,DIRECT` 处理域内兜底，AI App / CLI / 浏览器进程规则最后兜底。
+- 移除全局 `DOMAIN-KEYWORD,stun/turn` 链式规则，避免误伤会议、语音、游戏和 P2P 场景。
+- 新增 `DNS_ONLY` 解析例外桶，只参与 DNS / fallback-filter，不生成路由规则；测试扩展到 17 个用例，覆盖拆分文件传参和配置清理。
+
+---
+
 ## v11.3 (2026-05-03)
 
 - 将 Option A / Option B 收敛到单一入口 `src/residential-chain-proxy-override.js`，由 `USER_OPTIONS.overrideMode` 选择 `dns-sniffer-only` 或 `merged`。

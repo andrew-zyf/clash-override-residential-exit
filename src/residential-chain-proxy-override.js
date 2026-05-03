@@ -1,18 +1,21 @@
-// 家宽 IP 链式代理一体化覆写脚本
+// 家宽 IP 链式代理实现脚本
 //
-// 单文件按模式完成覆写：
+// 与 residential-chain-proxy-config.js 配合使用：
+//   1. 先导入 config 文件，填写 MIYA_CREDENTIALS / USER_OPTIONS。
+//   2. 再导入本文件，读取 config 写入的临时配置并完成覆写。
+//
+// 本文件按模式完成覆写：
 //   1. dns-sniffer-only：只写入 DNS / Sniffer，保留原有代理组和规则。
 //   2. merged：写入 DNS / Sniffer，注入 MiyaIP 节点，并写入链式代理、
 //      媒体分离、直连和兜底分流规则。
 //
-// 使用方式：只导入本文件；通过 USER_OPTIONS.overrideMode 选择只写 DNS/Sniffer
-// 或完整启用链式代理。完整模式需先在 MIYA_CREDENTIALS 填入真实凭证。
+// 为兼容测试和旧单文件用法，本文件保留内部默认 USER_OPTIONS / MIYA_CREDENTIALS。
 // 兼容性：Clash Party 的 JavaScriptCore；只用 ES5 语法。
 //
-// @version 11.3
+// @version 11.4
 
 // ---------------------------------------------------------------------------
-// 用户可调参数
+// 内部默认参数（优先使用 config 文件传入的用户配置）
 // ---------------------------------------------------------------------------
 
 var MIYA_CREDENTIALS = {
@@ -33,6 +36,8 @@ var USER_OPTIONS = {
   chainRegion: "SG", // AI 家宽出口前一跳地区，可选 US / JP / HK / SG / TW
   routeBrowserToChain: true // 是否让 AI 浏览器按应用名继续强制走 chainRegion
 };
+
+var USER_CONFIG_STATE_KEY = "_azChainProxyUserConfig";
 
 // ---------------------------------------------------------------------------
 // DNS / Sniffer 策略模块
@@ -57,7 +62,8 @@ var BASE = {
       "https://dns.alidns.com/dns-query",
       "https://doh.pub/dns-query"
     ],
-    openaiGeosite: "geosite:openai" // nameserver-policy 专用 geosite 键
+    domesticGeosite: "geosite:cn",
+    overseasGeosite: "geosite:geolocation-!cn"
   }
 };
 
@@ -833,6 +839,24 @@ var OVERSEAS = {
   }
 };
 
+// ---------- DNS Only · 仅解析例外 ----------
+// 这些域名只进入 nameserver-policy / fallback-filter，不生成分流规则。
+// 用于修正 geosite 大类未覆盖或解析质量异常的个别站点。
+var DNS_ONLY = {
+  domestic: {
+    cn_registry_and_public: [
+      "+.cnnic.cn",
+      "+.12306.cn"
+    ]
+  },
+  overseas: {
+    internet_standards: [
+      "+.iana.org",
+      "+.ietf.org"
+    ]
+  }
+};
+
 // ---------- Network Direct · 网络地址直连 ----------
 // 私有 / 链路本地 / CGNAT / Tailscale ULA 都走 DIRECT，避免被无意中走代理。
 var NETWORK = {
@@ -1059,6 +1083,14 @@ function buildPolicy() {
       key: "default.overseasCloudCdn", patterns: flattenGroupedPatterns(CDN.cloud),
       dnsZone: "overseas", fallbackFilter: true
     },
+    {
+      key: "dnsOnly.domestic", patterns: flattenGroupedPatterns(DNS_ONLY.domestic),
+      dnsZone: "domestic"
+    },
+    {
+      key: "dnsOnly.overseas", patterns: flattenGroupedPatterns(DNS_ONLY.overseas),
+      dnsZone: "overseas", fallbackFilter: true
+    },
 
     // ---- direct · 直连 ----
     // Apple 不绑定 dnsZone，走 nameserver + fallback 并行查询 + fallback-filter geoip 仲裁：
@@ -1268,7 +1300,8 @@ function writeDnsAndSniffer(config, derived) {
 function buildNameserverPolicy() {
   var dohByZone = { overseas: BASE.dns.overseas, domestic: BASE.dns.domestic };
   var policy = {};
-  policy[BASE.dns.openaiGeosite] = dohByZone.overseas;
+  policy[BASE.dns.domesticGeosite] = dohByZone.domestic;
+  policy[BASE.dns.overseasGeosite] = dohByZone.overseas;
 
   for (var i = 0; i < POLICY.length; i++) {
     var entry = POLICY[i];
@@ -1417,7 +1450,7 @@ function buildSnifferConfig(derived) {
 // ---------------------------------------------------------------------------
 
 var CHAIN_PROXY_STATE_KEY = "_azChainProxyState";
-var CHAIN_PROXY_STATE_VERSION = "11.3";
+var CHAIN_PROXY_STATE_VERSION = "11.4";
 
 function buildChainProxyState(derived) {
   return {
@@ -1859,12 +1892,14 @@ function dedupeRulesByIdentity(ruleLines) {
   return deduped;
 }
 
-// 拼接所有管理规则。顺序即优先级，浏览器进程规则放在最后避免压过更具体的域名匹配。
+// 拼接所有管理规则。顺序即优先级：显式域名优先，进程规则作为最后的链式兜底。
 function buildManagedRules(derived) {
-  var concatenated = buildStrictChainRules(derived)
+  var concatenated = buildStrictChainDomainRules(derived)
     .concat(buildMediaRules(derived))
     .concat(buildProxyRules(derived))
     .concat(buildDirectRules(derived))
+    .concat(buildChinaFallbackRules())
+    .concat(buildStrictProcessRules(derived))
     .concat(buildBrowserChainRules(derived));
   return dedupeRulesByIdentity(concatenated);
 }
@@ -1949,21 +1984,22 @@ function buildBrowserChainProcessGroups(derived) {
   return [derived.processNames.browser];
 }
 
-// 生成 chain 路由规则：受管进程 + AI CLI + chain 域名。
-function buildStrictChainRules(derived) {
+// 生成 chain 域名规则：AI / 支撑平台 / 集成服务显式锁定到链式出口。
+function buildStrictChainDomainRules(derived) {
+  var ruleLines = [];
+  appendSuffixRules(ruleLines, derived.patterns.chain.ai, UI_GROUPS.ai);
+  appendSuffixRules(ruleLines, derived.patterns.chain.support, UI_GROUPS.support);
+  appendSuffixRules(ruleLines, derived.patterns.chain.integrations, UI_GROUPS.integrations);
+  return ruleLines;
+}
+
+// 生成 AI App / CLI 进程兜底规则。放在域名规则和 CN 兜底之后，避免压过明确域名。
+function buildStrictProcessRules(derived) {
   var ruleLines = [];
   var processGroups = buildStrictProcessGroups(derived);
   for (var i = 0; i < processGroups.length; i++) {
     appendProcessRules(ruleLines, processGroups[i], UI_GROUPS.ai); // 统一丢向 AI 可视化面板
   }
-  
-  appendSuffixRules(ruleLines, derived.patterns.chain.ai, UI_GROUPS.ai);
-  appendSuffixRules(ruleLines, derived.patterns.chain.support, UI_GROUPS.support);
-  appendSuffixRules(ruleLines, derived.patterns.chain.integrations, UI_GROUPS.integrations);
-  
-  // 用 DOMAIN-KEYWORD 匹配 STUN/TURN，防止 WebRTC P2P 打洞泄漏真实 IP。
-  appendTypedRules(ruleLines, ["stun", "turn"], "DOMAIN-KEYWORD", UI_GROUPS.ai);
-
   return ruleLines;
 }
 
@@ -2003,6 +2039,14 @@ function buildDirectRules(derived) {
   }
   appendSuffixRules(ruleLines, derived.patterns.direct, BASE.ruleTargets.direct);
   return ruleLines;
+}
+
+// 生成中国站点直连兜底。DNS geosite 已负责解析，这里负责未显式维护域名的出口。
+function buildChinaFallbackRules() {
+  return [
+    "GEOSITE,cn," + BASE.ruleTargets.direct,
+    "GEOIP,CN," + BASE.ruleTargets.direct
+  ];
 }
 
 // 基于预构建的规则行查找表 O(1) 断言管理规则是否命中预期目标。
@@ -2113,7 +2157,7 @@ function validateManagedRouting(config, routingTargets, derived) {
 // ---------------------------------------------------------------------------
 
 var CHAIN_PROXY_STATE_KEY = "_azChainProxyState";
-var CHAIN_PROXY_STATE_VERSION = "11.3";
+var CHAIN_PROXY_STATE_VERSION = "11.4";
 
 function buildChainProxyStateForOverride(derived) {
   return {
@@ -2173,7 +2217,7 @@ function takeChainProxyState(config, derivedOverride) {
 function takeMiyaCredentials(config) {
   if (!config._miya) {
     throw createUserError(
-      "缺少 MiyaIP 凭证，请先在本脚本顶部 MIYA_CREDENTIALS 填写账号和端点"
+      "缺少 MiyaIP 凭证，请先在 residential-chain-proxy-config.js 填写 MIYA_CREDENTIALS"
     );
   }
   var miyaCredentials = config._miya;
@@ -2235,6 +2279,37 @@ function cloneMiyaCredentials(credentials) {
   };
 }
 
+function cloneUserOptions(options) {
+  return {
+    overrideMode: options.overrideMode,
+    chainRegion: options.chainRegion,
+    routeBrowserToChain: options.routeBrowserToChain
+  };
+}
+
+function hasUserConfig(config) {
+  return !!(
+    config &&
+    config[USER_CONFIG_STATE_KEY] &&
+    typeof config[USER_CONFIG_STATE_KEY] === "object"
+  );
+}
+
+function hydrateUserConfig(config) {
+  var userConfig;
+  if (!hasUserConfig(config)) return;
+
+  userConfig = config[USER_CONFIG_STATE_KEY];
+  if (userConfig.userOptions) {
+    USER_OPTIONS = cloneUserOptions(userConfig.userOptions);
+  }
+  if (userConfig.miyaCredentials) {
+    MIYA_CREDENTIALS = cloneMiyaCredentials(userConfig.miyaCredentials);
+  }
+
+  delete config[USER_CONFIG_STATE_KEY];
+}
+
 function normalizeOverrideMode(mode) {
   if (mode === undefined || mode === null || mode === "") return "merged";
   if (typeof mode !== "string") {
@@ -2278,17 +2353,21 @@ function resolveConfiguredMiyaCredentials(config) {
     return cloneMiyaCredentials(config._miya);
   }
   throw createUserError(
-    "请先在本脚本顶部 MIYA_CREDENTIALS 填写 MiyaIP 用户名、密码、家宽出口和官方中转端点"
+    "请先在 residential-chain-proxy-config.js 填写 MiyaIP 用户名、密码、家宽出口和官方中转端点，并确认配置文件排在实现文件前面"
   );
 }
 
 function main(config) {
+  hydrateUserConfig(config);
   DNS_SNIFFER_MODULE.apply(config);
   if (shouldApplyOnlyDnsAndSniffer()) {
     delete config._miya;
+    delete config[USER_CONFIG_STATE_KEY];
     return config;
   }
 
   config._miya = resolveConfiguredMiyaCredentials(config);
-  return applyChainProxy(config, DNS_SNIFFER_MODULE.DERIVED);
+  config = applyChainProxy(config, DNS_SNIFFER_MODULE.DERIVED);
+  delete config[USER_CONFIG_STATE_KEY];
+  return config;
 }
