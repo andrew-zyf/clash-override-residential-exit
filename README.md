@@ -8,7 +8,7 @@ AI 平台（OpenAI、Anthropic 等）的风控系统会追踪 IP 指纹一致性
 
 本脚本的解决方案：**机场节点提供速度，家宽 IP 提供纯净出口**，通过三层防泄漏机制确保所有 AI 相关流量（含登录验证、支付、遥测）始终从同一个家宽 IP 出站。
 
-**当前版本：** v11.5
+**当前版本：** v11.6
 
 ## Features
 
@@ -18,6 +18,17 @@ AI 平台（OpenAI、Anthropic 等）的风控系统会追踪 IP 指纹一致性
 - **统一策略引擎** — 所有路由 / DNS / Sniffer 决策汇总到 POLICY 一张表，覆盖订阅自带规则
 
 完整的流量分类和出口映射见 [路由对照表](#路由对照表)。
+
+## Quick Start
+
+1. 下载 [`src/residential-chain-proxy-config.js`](src/residential-chain-proxy-config.js) 和 [`src/residential-chain-proxy-override.js`](src/residential-chain-proxy-override.js)
+2. 打开 config 文件，设置 `overrideMode`：
+   - 只改善 DNS/嗅探 → `"dns-sniffer-only"`（不需家宽）
+   - 完整链式代理 → `"merged"`，并填入 `MIYA_CREDENTIALS`
+3. 在 Clash Party 覆写页按顺序导入并启用：先 config，后 override
+4. 切到机场订阅 → 规则模式 + TUN 模式 → 启动
+
+详见下方 [Usage](#usage) 完整步骤。
 
 ## Requirements
 

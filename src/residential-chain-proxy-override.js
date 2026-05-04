@@ -11,23 +11,79 @@
 //
 // 兼容性：Clash Party 的 JavaScriptCore；只用 ES5 语法。
 //
-// @version 11.5
+// @version 11.6
+//
+// 目录
+// ────
+//   1. 用户配置传递状态
+//   2. 共享工具函数
+//   3. DNS / Sniffer 策略模块
+//     3a. 基础常量 / 域名模式数据
+//     3b. 端到端样本 (EXPECTED_ROUTES)
+//     3c. 模块内工具函数
+//     3d. 策略表 (POLICY) 与派生分类 (DERIVED)
+//     3e. DNS / Sniffer 配置构建
+//   4. 基础常量 (BASE)
+//   5. 代理链路与选区
+//   6. 规则注入
+//   7. 路由校验
+//   8. 一体化覆写入口
 
-// ---------------------------------------------------------------------------
-// 用户配置传递状态
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// 1. 用户配置传递状态
+// ===========================================================================
 
 var USER_CONFIG_STATE_KEY = "_azChainProxyUserConfig";
 var ACTIVE_USER_OPTIONS = null;
 var ACTIVE_MIYA_CREDENTIALS = null;
+var CHAIN_PROXY_STATE_KEY = "_azChainProxyState";
+var CHAIN_PROXY_STATE_VERSION = "11.6";
+// ===========================================================================
+// 2. 共享工具函数
+// ===========================================================================
 
-// ---------------------------------------------------------------------------
-// DNS / Sniffer 策略模块
-// ---------------------------------------------------------------------------
+// 对字符串列表做稳定去重，保留首次出现的顺序。
+function uniqueStrings(values) {
+  var uniqueValues = [];
+  var seen = {};
+  for (var i = 0; i < values.length; i++) {
+    var value = values[i];
+    if (seen[value]) continue;
+    seen[value] = true;
+    uniqueValues.push(value);
+  }
+  return uniqueValues;
+}
+
+// 为字符串数组构建便于查询的哈希表。
+function buildStringLookup(values) {
+  var lookup = {};
+  for (var i = 0; i < values.length; i++) {
+    lookup[values[i]] = true;
+  }
+  return lookup;
+}
+
+// 把带通配前缀的域名模式转换成规则使用的裸域名后缀。
+function toSuffix(domainPattern) {
+  return domainPattern.indexOf("+.") === 0
+    ? domainPattern.substring(2)
+    : domainPattern;
+}
+
+function createUserError(message) {
+  return new Error(message);
+}
+
+
+
+// ===========================================================================
+// 3. DNS / Sniffer 策略模块
+// ===========================================================================
 
 var DNS_SNIFFER_MODULE = (function () {
 // ---------------------------------------------------------------------------
-// 基础常量
+// 3a. 基础常量
 // ---------------------------------------------------------------------------
 
 // DNS/Sniffer 模块只保留解析与派生分类所需的运行期常量。
@@ -53,11 +109,58 @@ var BASE = {
 BASE.dns.fallback = BASE.dns.overseas.concat(["https://dns.quad9.net/dns-query"]);
 
 // ---------------------------------------------------------------------------
-// 域名模式
+// 3a. 域名模式数据
 // ---------------------------------------------------------------------------
 
 // 这里只列"哪些域名属于哪个业务桶"，路由/DNS/sniffer 行为统一在下面的 POLICY 注入。
 // 模式形如 `+.domain`，转成规则时由 `toSuffix` 去掉 `+.` 前缀。
+
+// ---------- Fake-IP Filter · 需返回真实 IP 的域名 ----------
+// 这些域名不进入 fake-ip 映射，始终返回真实 DNS 解析结果。
+// 原因：NTP 对时、STUN 打洞、游戏主机联机、路由器管理等需要真实 IP。
+var FAKE_IP_BYPASS = {
+  localNetwork: [
+    "+.push.apple.com",
+    "+.lan",
+    "+.local",
+    "+.localhost",
+    "localhost.ptlogin2.qq.com"
+  ],
+  timeSync: [
+    "time.*.com",
+    "time.*.gov",
+    "time.*.edu.cn",
+    "time.*.apple.com",
+    "time-ios.apple.com",
+    "time-macos.apple.com",
+    "ntp.*.com",
+    "ntp1.aliyun.com",
+    "pool.ntp.org",
+    "+.pool.ntp.org"
+  ],
+  connectivityTest: [
+    "+.msftconnecttest.com",
+    "+.msftncsi.com"
+  ],
+  gamingRealtime: [
+    "+.srv.nintendo.net",
+    "+.stun.playstation.net",
+    "xbox.*.microsoft.com",
+    "+.xboxlive.com",
+    "+.battlenet.com.cn",
+    "+.blzstatic.cn"
+  ],
+  stunRealtime: [
+    "stun.*.*",
+    "stun.*.*.*"
+  ],
+  homeRouter: [
+    "+.router.asus.com",
+    "+.linksys.com",
+    "+.tplinkwifi.net",
+    "+.xiaoqiang.net"
+  ]
+};
 
 // ---------- Chain · 链式代理 ----------
 var CHAIN = {
@@ -902,21 +1005,8 @@ var EXPECTED_ROUTES = {
 };
 
 // ---------------------------------------------------------------------------
-// 通用数据处理工具
+// 3c. 模块内工具函数
 // ---------------------------------------------------------------------------
-
-// 对字符串列表做稳定去重，保留首次出现的顺序。
-function uniqueStrings(values) {
-  var uniqueValues = [];
-  var seen = {};
-  for (var i = 0; i < values.length; i++) {
-    var value = values[i];
-    if (seen[value]) continue;
-    seen[value] = true;
-    uniqueValues.push(value);
-  }
-  return uniqueValues;
-}
 
 // 合并多组字符串列表并保持稳定去重。
 function mergeStringGroups(groups) {
@@ -945,15 +1035,6 @@ function expandProcessNamesWithHelpers(appNames, helperSuffixes, exactProcessNam
   return uniqueStrings(processNames);
 }
 
-// 为字符串数组构建便于查询的哈希表。
-function buildStringLookup(values) {
-  var lookup = {};
-  for (var i = 0; i < values.length; i++) {
-    lookup[values[i]] = true;
-  }
-  return lookup;
-}
-
 // 从字符串数组中排除另一组字符串，保留原顺序。
 function excludeStrings(values, excludedValues) {
   var filteredValues = [];
@@ -978,13 +1059,6 @@ function assertPatternsHavePlusPrefix(patterns) {
   }
 }
 
-// 把带通配前缀的域名模式转换成规则使用的裸域名后缀。
-function toSuffix(domainPattern) {
-  return domainPattern.indexOf("+.") === 0
-    ? domainPattern.substring(2)
-    : domainPattern;
-}
-
 // ES5 安全的 `endsWith`：判断 str 是否以 suffix 结尾。
 function endsWithString(str, suffix) {
   if (suffix.length > str.length) return false;
@@ -999,13 +1073,8 @@ function flattenGroupedPatterns(groupedPatterns) {
   });
   return uniqueStrings(flattenedPatterns);
 }
-
-function createUserError(message) {
-  return new Error(message);
-}
-
 // ---------------------------------------------------------------------------
-// 策略表（POLICY）与派生分类
+// 3d. 策略表（POLICY）与派生分类
 // ---------------------------------------------------------------------------
 
 // POLICY — 所有域名模式的单一权威来源。
@@ -1275,7 +1344,7 @@ assertExpectedRoutesCoverage();
 
 // 把字符串数组映射为 { type, value } 规则目标列表。
 // ---------------------------------------------------------------------------
-// DNS + Sniffer
+// 3e. DNS / Sniffer 配置构建
 // ---------------------------------------------------------------------------
 
 // 写入 DNS 和 Sniffer 配置。
@@ -1307,55 +1376,14 @@ function buildNameserverPolicy() {
 // 构建 fake-ip-filter 白名单。
 // `+.` 匹配域名及子域；中部通配（`time.*.com` 等）保留 glob 写法。
 function buildDnsFakeIpFilter(derived) {
-  var localNetworkDomains = [
-    "+.push.apple.com",
-    "+.lan",
-    "+.local",
-    "+.localhost",
-    "localhost.ptlogin2.qq.com"
-  ];
-  var timeSyncDomains = [
-    "time.*.com", // 中部通配：保留 glob
-    "time.*.gov",
-    "time.*.edu.cn",
-    "time.*.apple.com",
-    "time-ios.apple.com",
-    "time-macos.apple.com",
-    "ntp.*.com",
-    "ntp1.aliyun.com",
-    "pool.ntp.org",
-    "+.pool.ntp.org"
-  ];
-  var connectivityTestDomains = [
-    "+.msftconnecttest.com", // 覆盖裸域与所有子域（含 www.）
-    "+.msftncsi.com"
-  ];
-  var gamingRealtimeDomains = [
-    "+.srv.nintendo.net",
-    "+.stun.playstation.net",
-    "xbox.*.microsoft.com", // 中部通配：保留 glob
-    "+.xboxlive.com",
-    "+.battlenet.com.cn",
-    "+.blzstatic.cn"
-  ]; // 游戏主机和游戏平台入口通常依赖真实 IP
-  var stunRealtimeDomains = [
-    "stun.*.*", // 中部通配：保留 glob
-    "stun.*.*.*"
-  ]; // 通用 STUN 常见于 WebRTC、语音和点对点连接
-  var homeRouterDomains = [
-    "+.router.asus.com",
-    "+.linksys.com",
-    "+.tplinkwifi.net",
-    "+.xiaoqiang.net"
-  ]; // 本地路由器和家庭网络设备入口应返回真实 IP
-
-  return localNetworkDomains
-    .concat(timeSyncDomains)
-    .concat(connectivityTestDomains)
+  return []
+    .concat(FAKE_IP_BYPASS.localNetwork)
+    .concat(FAKE_IP_BYPASS.timeSync)
+    .concat(FAKE_IP_BYPASS.connectivityTest)
     .concat(derived.patterns.fakeIpBypass)
-    .concat(gamingRealtimeDomains)
-    .concat(stunRealtimeDomains)
-    .concat(homeRouterDomains);
+    .concat(FAKE_IP_BYPASS.gamingRealtime)
+    .concat(FAKE_IP_BYPASS.stunRealtime)
+    .concat(FAKE_IP_BYPASS.homeRouter);
 }
 
 // DNS fallback-filter 配置。
@@ -1434,11 +1462,8 @@ function buildSnifferConfig(derived) {
 }
 
 // ---------------------------------------------------------------------------
-// DNS/Sniffer 模块入口
+// 3f. 模块入口
 // ---------------------------------------------------------------------------
-
-var CHAIN_PROXY_STATE_KEY = "_azChainProxyState";
-var CHAIN_PROXY_STATE_VERSION = "11.5";
 
 function buildChainProxyState(derived) {
   return {
@@ -1455,15 +1480,16 @@ function applyDnsAndSniffer(config) {
 return {
   BASE: BASE,
   DERIVED: DERIVED,
+  FAKE_IP_BYPASS: FAKE_IP_BYPASS,
   apply: applyDnsAndSniffer,
   buildChainProxyState: buildChainProxyState
 };
 
 })();
 
-// ---------------------------------------------------------------------------
-// 基础常量
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// 4. 基础常量
+// ===========================================================================
 
 // 所有运行期稳定常量的单一来源：地区、节点名、组名后缀、DoH 服务器、规则前缀。
 var BASE = {
@@ -1498,54 +1524,19 @@ var BASE = {
   chainGroupName: "az.核心链路.🔗 链式代理-家宽出口",
   regionFallbackOrder: {
     chain: ["SG", "TW", "JP", "US"] // 家宽出口优先低时延亚洲地区，最后再回退到美国
-  }
+  },
+  // Clash 支持的合法代理类型；buildMiyaProxy 会校验硬编码类型在此白名单内。
+  validProxyTypes: ["http", "https", "socks5", "ss", "ssr", "vmess", "trojan", "vless", "hysteria", "tuic", "snell", "wireguard"]
 };
-
-// ---------------------------------------------------------------------------
-// 通用数据处理工具
-// ---------------------------------------------------------------------------
-
-// 对字符串列表做稳定去重，保留首次出现的顺序。
-function uniqueStrings(values) {
-  var uniqueValues = [];
-  var seen = {};
-  for (var i = 0; i < values.length; i++) {
-    var value = values[i];
-    if (seen[value]) continue;
-    seen[value] = true;
-    uniqueValues.push(value);
-  }
-  return uniqueValues;
-}
-
-// 为字符串数组构建便于查询的哈希表。
-function buildStringLookup(values) {
-  var lookup = {};
-  for (var i = 0; i < values.length; i++) {
-    lookup[values[i]] = true;
-  }
-  return lookup;
-}
-
-// 把带通配前缀的域名模式转换成规则使用的裸域名后缀。
-function toSuffix(domainPattern) {
-  return domainPattern.indexOf("+.") === 0
-    ? domainPattern.substring(2)
-    : domainPattern;
-}
-
-function createUserError(message) {
-  return new Error(message);
-}
 
 // 是否让受管 AI 浏览器继续按应用名强制走 chainRegion。
 function shouldRouteBrowserToChain() {
   return ACTIVE_USER_OPTIONS.routeBrowserToChain !== false;
 }
 
-// ---------------------------------------------------------------------------
-// MiyaIP 代理链路与地区组选区
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// 5. 代理链路与选区
+// ===========================================================================
 
 // 确保主配置里存在代理、代理组和规则三个容器。
 function writeContainers(config) {
@@ -1577,7 +1568,11 @@ function buildRegionGroupName(regionMeta, groupNameSuffix) {
 }
 
 // 根据凭证和端点信息生成一个 MiyaIP HTTP 代理节点。
+// 硬编码 type:"http" 在加载期校验：确保 "http" 在 BASE.validProxyTypes 白名单内。
 function buildMiyaProxy(miyaCredentials, proxyName, endpoint) {
+  if (BASE.validProxyTypes.indexOf("http") < 0) {
+    throw createUserError("MiyaIP 代理类型 http 不在 Clash 合法代理类型列表中，请检查 BASE.validProxyTypes");
+  }
   return {
     name: proxyName,
     type: "http",
@@ -1848,9 +1843,9 @@ function writeManagedRouting(config, routingTargets, derived) {
   writeManagedRules(config, derived);
 }
 
-// ---------------------------------------------------------------------------
-// 规则注入（去重 + 置顶）
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// 6. 规则注入
+// ===========================================================================
 
 // 提取规则的 `"TYPE,value"` 标识。
 function getRuleIdentity(ruleLine) {
@@ -2140,12 +2135,9 @@ function validateManagedRouting(config, routingTargets, derived) {
   assertRuleTargetBatchExpanded(ruleLineLookup, validationTargets.media, [UI_GROUPS.video, UI_GROUPS.music, UI_GROUPS.social, UI_GROUPS.im]);
 }
 
-// ---------------------------------------------------------------------------
-// 主流程入口
-// ---------------------------------------------------------------------------
-
-var CHAIN_PROXY_STATE_KEY = "_azChainProxyState";
-var CHAIN_PROXY_STATE_VERSION = "11.5";
+// ===========================================================================
+// 7. 路由校验
+// ===========================================================================
 
 function buildChainProxyStateForOverride(derived) {
   return {
@@ -2234,9 +2226,9 @@ function applyChainProxy(config, derivedOverride) {
 }
 
 
-// ---------------------------------------------------------------------------
-// 一体化覆写入口
-// ---------------------------------------------------------------------------
+// ===========================================================================
+// 8. 一体化覆写入口
+// ===========================================================================
 
 function hasConfiguredMiyaCredentials(credentials) {
   return !!(
@@ -2245,10 +2237,10 @@ function hasConfiguredMiyaCredentials(credentials) {
     typeof credentials.password === "string" && credentials.password !== "" &&
     credentials.relay &&
     typeof credentials.relay.server === "string" && credentials.relay.server !== "" &&
-    credentials.relay.port &&
+    typeof credentials.relay.port === "number" && credentials.relay.port > 0 && credentials.relay.port < 65536 &&
     credentials.transit &&
     typeof credentials.transit.server === "string" && credentials.transit.server !== "" &&
-    credentials.transit.port
+    typeof credentials.transit.port === "number" && credentials.transit.port > 0 && credentials.transit.port < 65536
   );
 }
 

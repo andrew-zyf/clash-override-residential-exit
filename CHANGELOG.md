@@ -4,6 +4,12 @@
 
 ---
 
+## v11.6 (2026-05-05)
+
+- **凭证校验加固**：`hasConfiguredMiyaCredentials` 的 `relay.port` / `transit.port` 从 truthy 检查改为正整数范围校验（`typeof port === "number" && port > 0 && port < 65536`），拒绝 `0`、负数、越界值、字符串和空值。
+- **代理类型白名单**：`BASE` 新增 `validProxyTypes` 常量，覆盖 Clash 支持的 12 种合法代理类型；`buildMiyaProxy` 在生成 MiyaIP 节点前校验硬编码的 `"http"` 是否在白名单内，防止常量被误改后静默生成非法类型。
+- 新增 3 个单元测试（`tests/unit.js`）：port 边界 8 种场景 + `validProxyTypes` 常量完整性 + `buildMiyaProxy` 异常路径。
+
 ## v11.5 (2026-05-04)
 
 - CDN 基础设施域名（AWS / Amazon / CloudFront / Fastly / Akamai / Azure CDN / jsDelivr / Bunny / Cloudinary）从默认无路由改为链式代理出口 `chain.cdn`，合并至「支撑平台」UI 组，确保技术服务页面、CDN 资源等流量经家宽 IP 出口。
