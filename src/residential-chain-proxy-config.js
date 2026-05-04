@@ -4,7 +4,7 @@
 // 本文件只保存用户配置；实现逻辑在 override 文件中，升级时通常只需替换 override 文件。
 // 兼容性：Clash Party 的 JavaScriptCore；只用 ES5 语法。
 //
-// @version 11.4
+// @version 11.5
 
 var MIYA_CREDENTIALS = {
   username: "",

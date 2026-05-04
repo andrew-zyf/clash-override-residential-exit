@@ -4,6 +4,12 @@
 
 ---
 
+## v11.5 (2026-05-04)
+
+- CDN 基础设施域名（AWS / Amazon / CloudFront / Fastly / Akamai / Azure CDN / jsDelivr / Bunny / Cloudinary）从默认无路由改为链式代理出口 `chain.cdn`，合并至「支撑平台」UI 组，确保技术服务页面、CDN 资源等流量经家宽 IP 出口。
+
+---
+
 ## v11.4 (2026-05-03)
 
 - 拆分用户配置与实现逻辑：新增 `src/residential-chain-proxy-config.js` 保存 `MIYA_CREDENTIALS` / `USER_OPTIONS`，`src/residential-chain-proxy-override.js` 不再保留重复用户配置，只读取临时配置后立即清理，升级实现文件时可保留本地配置。

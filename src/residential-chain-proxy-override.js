@@ -11,7 +11,7 @@
 //
 // 兼容性：Clash Party 的 JavaScriptCore；只用 ES5 语法。
 //
-// @version 11.4
+// @version 11.5
 
 // ---------------------------------------------------------------------------
 // 用户配置传递状态
@@ -350,6 +350,7 @@ var CDN = {
     ],
     aws: [
       "+.amazonaws.com",
+      "+.amazon.com",
       "+.awsstatic.com",
       "+.cloudfront.net"
     ],
@@ -564,6 +565,9 @@ var CN = {
       "+.tongyi.aliyun.com",
       "+.qianwen.aliyun.com",
       "+.dashscope.aliyuncs.com"
+    ],
+    modelscope: [ 
+      "+.modelscope.cn"
     ],
     moonshot: [
       "+.moonshot.cn"
@@ -1056,14 +1060,15 @@ function buildPolicy() {
       route: "media.im", dnsZone: "overseas", fallbackFilter: true
     },
 
-    // ---- 默认代理（不写 route，仅做 DNS / fallback-filter）----
+    // ---- proxy · DoH 端点走通用代理寻址 ----
     {
       key: "default.doh", patterns: flattenGroupedPatterns(CDN.doh),
       route: "proxy", dnsZone: "overseas", fallbackFilter: true
     },
+    // ---- chain · CDN 基础设施走家宽出口 ----
     {
-      key: "default.overseasCloudCdn", patterns: flattenGroupedPatterns(CDN.cloud),
-      dnsZone: "overseas", fallbackFilter: true
+      key: "chain.cdn", patterns: flattenGroupedPatterns(CDN.cloud),
+      route: "chain.cdn", dnsZone: "overseas", sniffer: "force", fallbackFilter: true
     },
     {
       key: "dnsOnly.domestic", patterns: flattenGroupedPatterns(DNS_ONLY.domestic),
@@ -1160,7 +1165,8 @@ function buildDerivedPatterns() {
   var chainSupport = excludeStrings(projectPolicyPatterns(matchRoute("chain.support")), direct);
   var chainIntegrations = excludeStrings(projectPolicyPatterns(matchRoute("chain.integrations")), direct);
   var chainCloudflare = excludeStrings(projectPolicyPatterns(matchRoute("chain.cloudflare")), direct);
-  var chainAll = mergeStringGroups([chainAi, chainSupport, chainIntegrations, chainCloudflare]);
+  var chainCdn = excludeStrings(projectPolicyPatterns(matchRoute("chain.cdn")), direct);
+  var chainAll = mergeStringGroups([chainAi, chainSupport, chainIntegrations, chainCloudflare, chainCdn]);
 
   var mediaVideo = excludeStrings(projectPolicyPatterns(matchRoute("media.video")), direct);
   var mediaMusic = excludeStrings(projectPolicyPatterns(matchRoute("media.music")), direct);
@@ -1172,7 +1178,7 @@ function buildDerivedPatterns() {
     proxy: proxy,
     chain: {
       ai: chainAi,
-      support: chainSupport,
+      support: mergeStringGroups([chainSupport, chainCdn]),
       integrations: mergeStringGroups([chainIntegrations, chainCloudflare]),
       all: chainAll
     },
@@ -1432,7 +1438,7 @@ function buildSnifferConfig(derived) {
 // ---------------------------------------------------------------------------
 
 var CHAIN_PROXY_STATE_KEY = "_azChainProxyState";
-var CHAIN_PROXY_STATE_VERSION = "11.4";
+var CHAIN_PROXY_STATE_VERSION = "11.5";
 
 function buildChainProxyState(derived) {
   return {
@@ -2139,7 +2145,7 @@ function validateManagedRouting(config, routingTargets, derived) {
 // ---------------------------------------------------------------------------
 
 var CHAIN_PROXY_STATE_KEY = "_azChainProxyState";
-var CHAIN_PROXY_STATE_VERSION = "11.4";
+var CHAIN_PROXY_STATE_VERSION = "11.5";
 
 function buildChainProxyStateForOverride(derived) {
   return {
