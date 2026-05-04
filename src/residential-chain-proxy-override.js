@@ -11,7 +11,7 @@
 //
 // 兼容性：Clash Party 的 JavaScriptCore；只用 ES5 语法。
 //
-// @version 11.5
+// @version 11.6
 //
 // 目录
 // ────
@@ -37,7 +37,7 @@ var USER_CONFIG_STATE_KEY = "_azChainProxyUserConfig";
 var ACTIVE_USER_OPTIONS = null;
 var ACTIVE_MIYA_CREDENTIALS = null;
 var CHAIN_PROXY_STATE_KEY = "_azChainProxyState";
-var CHAIN_PROXY_STATE_VERSION = "11.5";
+var CHAIN_PROXY_STATE_VERSION = "11.6";
 // ===========================================================================
 // 2. 共享工具函数
 // ===========================================================================
