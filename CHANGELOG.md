@@ -4,6 +4,14 @@
 
 ---
 
+## v11.7 (2026-05-06)
+
+- **单文件合并**：`residential-chain-proxy-config.js` + `residential-chain-proxy-override.js` 合并为 `residential-chain-proxy-combined.js`，`MIYA_CREDENTIALS` / `USER_OPTIONS` 作为文件顶部变量直接嵌入。适配 Clash Verge 等只支持单覆写文件的客户端。
+- **入口状态精简**：`main(config)` 直接克隆顶部 `USER_OPTIONS`，`merged` 模式把 `MIYA_CREDENTIALS` 作为局部变量传入链式代理入口；移除 `_azChainProxyUserConfig` / `_miya` / `_azChainProxyState` 这类合并后不再需要的临时传递字段。
+- **实现去重**：收敛 route 投影 helper、DNS/Sniffer 写入入口和进程规则追加逻辑，删除重复的派生状态 builder，同时保持 POLICY / DERIVED 注释密度不变。
+- **测试合并**：`tests/unit.js` + `tests/validate.js` 合并为 `tests/test.js`（11 个纯函数单元测试 + 16 个端到端集成测试），从合并后的单文件加载沙箱。
+- 移除旧拆分文件 `residential-chain-proxy-config.js`、`residential-chain-proxy-override.js`、`residential-chain-proxy.min.js` 及旧测试文件。
+
 ## v11.6 (2026-05-05)
 
 - **凭证校验加固**：`hasConfiguredMiyaCredentials` 的 `relay.port` / `transit.port` 从 truthy 检查改为正整数范围校验（`typeof port === "number" && port > 0 && port < 65536`），拒绝 `0`、负数、越界值、字符串和空值。

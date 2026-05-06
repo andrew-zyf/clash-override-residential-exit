@@ -1,43 +1,43 @@
-// 家宽 IP 链式代理实现脚本
+// 家宽 IP 链式代理 — 单文件合并版
 //
-// 与 residential-chain-proxy-config.js 配合使用：
-//   1. 先导入 config 文件，填写 MIYA_CREDENTIALS / USER_OPTIONS。
-//   2. 再导入本文件，读取 config 写入的临时配置并完成覆写。
+// 使用方式：将此文件作为 Clash 覆写脚本导入。
+// 请在下面的 MIYA_CREDENTIALS 和 USER_OPTIONS 中填写你的配置。
+// 兼容性：Clash Verge / Clash Party 的 JavaScriptCore；只用 ES5 语法。
 //
-// 本文件按模式完成覆写：
-//   1. dns-sniffer-only：只写入 DNS / Sniffer，保留原有代理组和规则。
-//   2. merged：写入 DNS / Sniffer，注入 MiyaIP 节点，并写入链式代理、
-//      媒体分离、直连和兜底分流规则。
+// 单文件说明：由旧 config + override 两个入口合并而来。
 //
-// 兼容性：Clash Party 的 JavaScriptCore；只用 ES5 语法。
-//
-// @version 11.6
-//
-// 目录
-// ────
-//   1. 用户配置传递状态
-//   2. 共享工具函数
-//   3. DNS / Sniffer 策略模块
-//     3a. 基础常量 / 域名模式数据
-//     3b. 端到端样本 (EXPECTED_ROUTES)
-//     3c. 模块内工具函数
-//     3d. 策略表 (POLICY) 与派生分类 (DERIVED)
-//     3e. DNS / Sniffer 配置构建
-//   4. 基础常量 (BASE)
-//   5. 代理链路与选区
-//   6. 规则注入
-//   7. 路由校验
-//   8. 一体化覆写入口
+// @version 11.7
 
 // ===========================================================================
-// 1. 用户配置传递状态
+// 用户配置
 // ===========================================================================
 
-var USER_CONFIG_STATE_KEY = "_azChainProxyUserConfig";
+var USER_OPTIONS = {
+  // overrideMode: "dns-sniffer-only", // dns-sniffer-only = 只写 DNS/Sniffer
+  overrideMode: "merged", // merged = DNS/Sniffer + 链式/媒体分流
+  chainRegion: "SG", // AI 家宽出口前一跳地区，可选 US / JP / HK / SG / TW
+  routeBrowserToChain: true // 是否让 AI 浏览器按应用名继续强制走 chainRegion
+};
+
+var MIYA_CREDENTIALS = {
+  username: "",
+  password: "",
+  relay: {
+    server: "",
+    port: 8022
+  },
+  transit: {
+    server: "",
+    port: 8001
+  }
+};
+
+// ===========================================================================
+// 1. 运行期状态
+// ===========================================================================
+
 var ACTIVE_USER_OPTIONS = null;
-var ACTIVE_MIYA_CREDENTIALS = null;
-var CHAIN_PROXY_STATE_KEY = "_azChainProxyState";
-var CHAIN_PROXY_STATE_VERSION = "11.6";
+
 // ===========================================================================
 // 2. 共享工具函数
 // ===========================================================================
@@ -74,8 +74,6 @@ function toSuffix(domainPattern) {
 function createUserError(message) {
   return new Error(message);
 }
-
-
 
 // ===========================================================================
 // 3. DNS / Sniffer 策略模块
@@ -1219,6 +1217,11 @@ function matchSniffer(mode) {
 function matchFakeIpBypass(entry) { return entry.fakeIpBypass === true; }
 function matchFallbackFilter(entry) { return entry.fallbackFilter === true; }
 
+// 按 route 投影并应用 direct 优先级。
+function projectRoutedPatterns(route, directPatterns) {
+  return excludeStrings(projectPolicyPatterns(matchRoute(route)), directPatterns);
+}
+
 // 从 POLICY 投影出下游真正消费的三类域名集合：
 //   chain    → 进家宽出口（排除被 direct 抢占的模式）
 //   media    → 媒体地区组
@@ -1228,19 +1231,19 @@ function matchFallbackFilter(entry) { return entry.fallbackFilter === true; }
 //   fakeIpBypass → 需要返回真实 IP 的域名（Apple 等）
 function buildDerivedPatterns() {
   var direct = projectPolicyPatterns(matchRoute("direct"));
-  var proxy = excludeStrings(projectPolicyPatterns(matchRoute("proxy")), direct);
+  var proxy = projectRoutedPatterns("proxy", direct);
 
-  var chainAi = excludeStrings(projectPolicyPatterns(matchRoute("chain.ai")), direct);
-  var chainSupport = excludeStrings(projectPolicyPatterns(matchRoute("chain.support")), direct);
-  var chainIntegrations = excludeStrings(projectPolicyPatterns(matchRoute("chain.integrations")), direct);
-  var chainCloudflare = excludeStrings(projectPolicyPatterns(matchRoute("chain.cloudflare")), direct);
-  var chainCdn = excludeStrings(projectPolicyPatterns(matchRoute("chain.cdn")), direct);
+  var chainAi = projectRoutedPatterns("chain.ai", direct);
+  var chainSupport = projectRoutedPatterns("chain.support", direct);
+  var chainIntegrations = projectRoutedPatterns("chain.integrations", direct);
+  var chainCloudflare = projectRoutedPatterns("chain.cloudflare", direct);
+  var chainCdn = projectRoutedPatterns("chain.cdn", direct);
   var chainAll = mergeStringGroups([chainAi, chainSupport, chainIntegrations, chainCloudflare, chainCdn]);
 
-  var mediaVideo = excludeStrings(projectPolicyPatterns(matchRoute("media.video")), direct);
-  var mediaMusic = excludeStrings(projectPolicyPatterns(matchRoute("media.music")), direct);
-  var mediaSocial = excludeStrings(projectPolicyPatterns(matchRoute("media.social")), direct);
-  var mediaIm = excludeStrings(projectPolicyPatterns(matchRoute("media.im")), direct);
+  var mediaVideo = projectRoutedPatterns("media.video", direct);
+  var mediaMusic = projectRoutedPatterns("media.music", direct);
+  var mediaSocial = projectRoutedPatterns("media.social", direct);
+  var mediaIm = projectRoutedPatterns("media.im", direct);
   var mediaAll = mergeStringGroups([mediaVideo, mediaMusic, mediaSocial, mediaIm]);
 
   return {
@@ -1346,12 +1349,6 @@ assertExpectedRoutesCoverage();
 // ---------------------------------------------------------------------------
 // 3e. DNS / Sniffer 配置构建
 // ---------------------------------------------------------------------------
-
-// 写入 DNS 和 Sniffer 配置。
-function writeDnsAndSniffer(config, derived) {
-  config.dns = buildDnsConfig(derived);
-  config.sniffer = buildSnifferConfig(derived);
-}
 
 // 从 POLICY 按 dnsZone 生成 nameserver-policy 映射。
 function buildNameserverPolicy() {
@@ -1465,15 +1462,9 @@ function buildSnifferConfig(derived) {
 // 3f. 模块入口
 // ---------------------------------------------------------------------------
 
-function buildChainProxyState(derived) {
-  return {
-    version: CHAIN_PROXY_STATE_VERSION,
-    derived: derived
-  };
-}
-
 function applyDnsAndSniffer(config) {
-  writeDnsAndSniffer(config, DERIVED);
+  config.dns = buildDnsConfig(DERIVED);
+  config.sniffer = buildSnifferConfig(DERIVED);
   return config;
 }
 
@@ -1481,8 +1472,7 @@ return {
   BASE: BASE,
   DERIVED: DERIVED,
   FAKE_IP_BYPASS: FAKE_IP_BYPASS,
-  apply: applyDnsAndSniffer,
-  buildChainProxyState: buildChainProxyState
+  apply: applyDnsAndSniffer
 };
 
 })();
@@ -1755,7 +1745,7 @@ function writeDialerProxy(config, relayTarget) {
 }
 
 // 创建链式出口 select 组（MiyaIP 官方中转 / 家宽出口二选一）。
-function writeChainGroup(config, region) {
+function writeChainGroup(config) {
   var chainGroupName = BASE.chainGroupName;
 
   upsertNamedItem(config["proxy-groups"], {
@@ -1810,7 +1800,7 @@ function writeExpandedProxyGroups(config, strictAiTarget, regionalTargets) {
 // 解析路由目标：创建地区组、链式出口组、UI 面板组。
 function resolveRoutingTargets(config, chainRegion) {
   var relayResolution = resolveRelayTarget(config, chainRegion);
-  var chainGroupName = writeChainGroup(config, relayResolution.region);
+  var chainGroupName = writeChainGroup(config);
   
   writeManagedGroupIntoNodeSelection(config, relayResolution.target);
   
@@ -1956,6 +1946,13 @@ function appendProcessRules(ruleLines, processNames, target) {
   appendTypedRules(ruleLines, processNames, "PROCESS-NAME", target);
 }
 
+// 批量追加多个进程分组。
+function appendProcessRuleGroups(ruleLines, processGroups, target) {
+  for (var i = 0; i < processGroups.length; i++) {
+    appendProcessRules(ruleLines, processGroups[i], target);
+  }
+}
+
 // 返回应纳入严格 AI 路由的进程分组；AI CLI 固定走 chainRegion。
 function buildStrictProcessGroups(derived) {
   return [derived.processNames.aiApps, derived.processNames.aiCli];
@@ -1979,10 +1976,7 @@ function buildStrictChainDomainRules(derived) {
 // 生成 AI App / CLI 进程兜底规则。放在域名规则和 CN 兜底之后，避免压过明确域名。
 function buildStrictProcessRules(derived) {
   var ruleLines = [];
-  var processGroups = buildStrictProcessGroups(derived);
-  for (var i = 0; i < processGroups.length; i++) {
-    appendProcessRules(ruleLines, processGroups[i], UI_GROUPS.ai); // 统一丢向 AI 可视化面板
-  }
+  appendProcessRuleGroups(ruleLines, buildStrictProcessGroups(derived), UI_GROUPS.ai); // 统一丢向 AI 可视化面板
   return ruleLines;
 }
 
@@ -1996,10 +1990,7 @@ function buildProxyRules(derived) {
 // 生成链式浏览器规则，承载按应用名强制分流的 AI 浏览器进程。
 function buildBrowserChainRules(derived) {
   var ruleLines = [];
-  var processGroups = buildBrowserChainProcessGroups(derived);
-  for (var i = 0; i < processGroups.length; i++) {
-    appendProcessRules(ruleLines, processGroups[i], UI_GROUPS.ai); // 统一丢向 AI 可视化面板
-  }
+  appendProcessRuleGroups(ruleLines, buildBrowserChainProcessGroups(derived), UI_GROUPS.ai); // 统一丢向 AI 可视化面板
   return ruleLines;
 }
 
@@ -2139,13 +2130,6 @@ function validateManagedRouting(config, routingTargets, derived) {
 // 7. 路由校验
 // ===========================================================================
 
-function buildChainProxyStateForOverride(derived) {
-  return {
-    version: CHAIN_PROXY_STATE_VERSION,
-    derived: derived
-  };
-}
-
 function buildRoutingValidationTargets(derived) {
   return {
     strict: buildDomainValidationTargets(derived.patterns.chain.all)
@@ -2173,43 +2157,8 @@ function buildProcessValidationTargets(processNames) {
   return buildValidationTargets("PROCESS-NAME", processNames);
 }
 
-function takeChainProxyState(config, derivedOverride) {
-  var chainState;
-  if (derivedOverride) return buildChainProxyStateForOverride(derivedOverride);
-
-  chainState = config[CHAIN_PROXY_STATE_KEY];
-  if (!chainState || !chainState.derived) {
-    throw createUserError(
-      "缺少 DNS/Sniffer 派生状态，请通过本脚本 main(config) 入口运行"
-    );
-  }
-  if (chainState.version !== CHAIN_PROXY_STATE_VERSION) {
-    throw createUserError(
-      "DNS/Sniffer 派生状态与链式代理版本不匹配，请更新本脚本"
-    );
-  }
-
-  delete config[CHAIN_PROXY_STATE_KEY];
-  return chainState;
-}
-
-// 读取并移除 MiyaIP 凭证（防止泄漏到最终配置）。
-function takeMiyaCredentials(config) {
-  if (!config._miya) {
-    throw createUserError(
-      "缺少 MiyaIP 凭证，请先在 residential-chain-proxy-config.js 填写 MIYA_CREDENTIALS"
-    );
-  }
-  var miyaCredentials = config._miya;
-  delete config._miya; // 防止凭证输出到最终配置
-  return miyaCredentials;
-}
-
-// 链式代理入口。装配顺序：读取 DNS/Sniffer 派生状态 → 容器 → MiyaIP 节点 → 路由目标 → 规则 → 校验。
-function applyChainProxy(config, derivedOverride) {
-  var chainState = takeChainProxyState(config, derivedOverride);
-  var derived = chainState.derived;
-  var miyaCredentials = takeMiyaCredentials(config); // 先取出并隐藏凭证
+// 链式代理入口。装配顺序：容器 → MiyaIP 节点 → 路由目标 → 规则 → 校验。
+function applyChainProxy(config, derived, miyaCredentials) {
   var routingTargets;
 
   writeContainers(config); // 初始化基础容器
@@ -2225,9 +2174,8 @@ function applyChainProxy(config, derivedOverride) {
   return config;
 }
 
-
 // ===========================================================================
-// 8. 一体化覆写入口
+// 8. 一体化覆写入口（合并版）
 // ===========================================================================
 
 function hasConfiguredMiyaCredentials(credentials) {
@@ -2267,35 +2215,6 @@ function cloneUserOptions(options) {
   };
 }
 
-function hasUserConfig(config) {
-  return !!(
-    config &&
-    config[USER_CONFIG_STATE_KEY] &&
-    typeof config[USER_CONFIG_STATE_KEY] === "object"
-  );
-}
-
-function hydrateUserConfig(config) {
-  var userConfig;
-  if (!hasUserConfig(config)) {
-    throw createUserError(
-      "缺少用户配置，请先导入 residential-chain-proxy-config.js，并确认它排在 residential-chain-proxy-override.js 前面"
-    );
-  }
-
-  userConfig = config[USER_CONFIG_STATE_KEY];
-  if (!userConfig.userOptions) {
-    throw createUserError("用户配置缺少 USER_OPTIONS，请检查 residential-chain-proxy-config.js");
-  }
-
-  ACTIVE_USER_OPTIONS = cloneUserOptions(userConfig.userOptions);
-  ACTIVE_MIYA_CREDENTIALS = userConfig.miyaCredentials
-    ? cloneMiyaCredentials(userConfig.miyaCredentials)
-    : null;
-
-  delete config[USER_CONFIG_STATE_KEY];
-}
-
 function normalizeOverrideMode(mode) {
   if (mode === undefined || mode === null || mode === "") return "merged";
   if (typeof mode !== "string") {
@@ -2331,26 +2250,24 @@ function shouldApplyOnlyDnsAndSniffer() {
   return normalizeOverrideMode(ACTIVE_USER_OPTIONS.overrideMode) === "dns-sniffer-only";
 }
 
-function resolveConfiguredMiyaCredentials(config) {
-  if (hasConfiguredMiyaCredentials(ACTIVE_MIYA_CREDENTIALS)) {
-    return cloneMiyaCredentials(ACTIVE_MIYA_CREDENTIALS);
+function resolveConfiguredMiyaCredentials(credentials) {
+  if (hasConfiguredMiyaCredentials(credentials)) {
+    return cloneMiyaCredentials(credentials);
   }
   throw createUserError(
-    "请先在 residential-chain-proxy-config.js 填写 MiyaIP 用户名、密码、家宽出口和官方中转端点，并确认配置文件排在实现文件前面"
+    "请先填写 MIYA_CREDENTIALS 中的用户名、密码、家宽出口和官方中转端点"
   );
 }
 
 function main(config) {
-  hydrateUserConfig(config);
+  var miyaCredentials;
+
+  ACTIVE_USER_OPTIONS = cloneUserOptions(USER_OPTIONS);
   DNS_SNIFFER_MODULE.apply(config);
   if (shouldApplyOnlyDnsAndSniffer()) {
-    delete config._miya;
-    delete config[USER_CONFIG_STATE_KEY];
     return config;
   }
 
-  config._miya = resolveConfiguredMiyaCredentials(config);
-  config = applyChainProxy(config, DNS_SNIFFER_MODULE.DERIVED);
-  delete config[USER_CONFIG_STATE_KEY];
-  return config;
+  miyaCredentials = resolveConfiguredMiyaCredentials(MIYA_CREDENTIALS);
+  return applyChainProxy(config, DNS_SNIFFER_MODULE.DERIVED, miyaCredentials);
 }
