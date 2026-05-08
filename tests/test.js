@@ -1,6 +1,6 @@
-// MiyaIP 家宽出口覆写 — 测试套件
+// 家宽出口覆写 — 测试套件
 //
-// 测试 miya-residential-exit-override.js 的纯函数与端到端行为。
+// 测试 residential-exit-override.js 的纯函数与端到端行为。
 // 运行：node tests/test.js
 
 const assert = require("assert");
@@ -8,10 +8,10 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 
-const overridePath = path.join(__dirname, "..", "src", "miya-residential-exit-override.js");
+const overridePath = path.join(__dirname, "..", "src", "residential-exit-override.js");
 const overrideCode = fs.readFileSync(overridePath, "utf8");
 
-const TEST_MIYA_CREDENTIALS = {
+const TEST_RESIDENTIAL_CREDENTIALS = {
   username: "user",
   password: "pass",
   transit: { server: "transit.example.com", port: 8001 }
@@ -52,10 +52,10 @@ function createBaseConfig() {
 
 // Run the combined main with optional config/sandbox mutations.
 // sandboxMutator receives the sandbox before main() — use it to override
-// MIYA_CREDENTIALS / USER_OPTIONS on the sandbox object.
+// RESIDENTIAL_CREDENTIALS / USER_OPTIONS on the sandbox object.
 function runMain(configMutator, sandboxMutator) {
   const sandbox = loadCombinedSandbox();
-  sandbox.MIYA_CREDENTIALS = cloneJson(TEST_MIYA_CREDENTIALS);
+  sandbox.RESIDENTIAL_CREDENTIALS = cloneJson(TEST_RESIDENTIAL_CREDENTIALS);
   if (typeof sandboxMutator === "function") sandboxMutator(sandbox);
 
   let config = createBaseConfig();
@@ -284,6 +284,21 @@ function testCoreGroupDefinition() {
   console.log("  PASS core group definition");
 }
 
+// ---- provider brand should not appear in script naming ----
+function testNoProviderBrandInScript() {
+  const providerPattern = new RegExp("Mi" + "ya", "i");
+  assert(!providerPattern.test(overrideCode), "Provider brand should not appear in script");
+  console.log("  PASS no provider brand in script");
+}
+
+// ---- browser routing is part of AI dispatch group, not a user option ----
+function testNoSeparateBrowserRoutingOption() {
+  const optionName = ["routeBrowser", "ToResidential", "Exit"].join("");
+  assert(!overrideCode.includes(optionName),
+    "Browser process routing should be part of AI dispatch, not a separate option");
+  console.log("  PASS no separate browser routing option");
+}
+
 // ---- FAKE_IP_BYPASS structure ----
 function testFakeIpBypassConstant() {
   const bip = S.DNS_SNIFFER_MODULE.FAKE_IP_BYPASS;
@@ -304,7 +319,7 @@ function testFakeIpBypassConstant() {
 function testDnsConfigContainsFakeIpBypass() {
   const sandbox = loadCombinedSandbox();
   sandbox.USER_OPTIONS.overrideMode = "dns-sniffer-only";
-  sandbox.MIYA_CREDENTIALS = {
+  sandbox.RESIDENTIAL_CREDENTIALS = {
     username: "", password: "",
     transit: { server: "", port: 8001 }
   };
@@ -317,13 +332,13 @@ function testDnsConfigContainsFakeIpBypass() {
   assert(fif.includes("ntp.*.com"), "should contain ntp wildcard");
   assert(fif.includes("stun.*.*"), "should contain stun wildcard");
   assert(fif.includes("+.xboxlive.com"), "should contain xboxlive");
-  assert.strictEqual(output._miya, undefined);
+  assert.strictEqual(output._residential, undefined);
   console.log("  PASS DNS config fake-ip-filter");
 }
 
-// ---- hasConfiguredMiyaCredentials port validation ----
-function testHasConfiguredMiyaCredentialsPort() {
-  const fn = S.hasConfiguredMiyaCredentials;
+// ---- hasConfiguredResidentialCredentials port validation ----
+function testHasConfiguredResidentialCredentialsPort() {
+  const fn = S.hasConfiguredResidentialCredentials;
   assert.strictEqual(fn({
     username: "u", password: "p",
     transit: { server: "5.6.7.8", port: 65535 }
@@ -348,7 +363,7 @@ function testHasConfiguredMiyaCredentialsPort() {
     username: "u", password: "p",
     transit: { server: "5.6.7.8", port: null }
   }), false);
-  console.log("  PASS hasConfiguredMiyaCredentials port validation");
+  console.log("  PASS hasConfiguredResidentialCredentials port validation");
 }
 
 // ---- validProxyTypes constant ----
@@ -361,9 +376,9 @@ function testValidProxyTypesConstant() {
   console.log("  PASS validProxyTypes constant");
 }
 
-// ---- buildMiyaProxy type validation ----
-function testBuildMiyaProxyTypeValidation() {
-  const proxy = S.buildMiyaProxy(
+// ---- buildResidentialProxy type validation ----
+function testBuildResidentialProxyTypeValidation() {
+  const proxy = S.buildResidentialProxy(
     { username: "u", password: "p" },
     "test-proxy",
     { server: "1.2.3.4", port: 8080 }
@@ -378,17 +393,17 @@ function testBuildMiyaProxyTypeValidation() {
   var httpIdx = S.BASE.validProxyTypes.indexOf("http");
   S.BASE.validProxyTypes.splice(httpIdx, 1);
   try {
-    S.buildMiyaProxy(
+    S.buildResidentialProxy(
       { username: "u", password: "p" },
       "test-proxy",
       { server: "1.2.3.4", port: 8080 }
     );
-    assert.fail("Expected buildMiyaProxy to throw when http is not in validProxyTypes");
+    assert.fail("Expected buildResidentialProxy to throw when http is not in validProxyTypes");
   } catch (e) {
     assert(e.message.indexOf("http 不在") >= 0, "Expected error about invalid proxy type");
   }
   S.BASE.validProxyTypes = saved;
-  console.log("  PASS buildMiyaProxy type validation");
+  console.log("  PASS buildResidentialProxy type validation");
 }
 
 // ===========================================================================
@@ -404,7 +419,7 @@ function assertManagedProxyTopology(output, sandbox) {
   const transitProxy = findProxy(output, nodeNames.transit);
   assert(transitProxy, "transit proxy missing");
   assert.strictEqual(transitProxy.type, "http");
-  assert.strictEqual(transitProxy.server, TEST_MIYA_CREDENTIALS.transit.server);
+  assert.strictEqual(transitProxy.server, TEST_RESIDENTIAL_CREDENTIALS.transit.server);
 
   const sgGroup = findGroup(output, names.sgRegion);
   assert(sgGroup, "SG region group missing");
@@ -628,7 +643,7 @@ function assertDnsAndSniffer(output, dnsBase) {
 
 function testDefaultConfig() {
   const { sandbox, state, dnsBase, output } = runMain();
-  assert.strictEqual(output._miya, undefined);
+  assert.strictEqual(output._residential, undefined);
   assertManagedProxyTopology(output, sandbox);
   assertCoreStrictRouting(output, sandbox);
   assertMediaRouting(output, sandbox);
@@ -641,13 +656,13 @@ function testDefaultConfig() {
   assertNoDuplicateRuleIdentities(output.rules.slice(0, 250));
 }
 
-function testRequiresConfiguredMiyaCredentials() {
+function testRequiresConfiguredResidentialCredentials() {
   assert.throws(() => runMain(null, (sb) => {
-    sb.MIYA_CREDENTIALS = {
+    sb.RESIDENTIAL_CREDENTIALS = {
       username: "", password: "",
       transit: { server: "", port: 8001 }
     };
-  }), /MiyaIP|MIYA_CREDENTIALS/);
+  }), /RESIDENTIAL_CREDENTIALS/);
 }
 
 function testMergedModeDoesNotRequireRegionNodes() {
@@ -672,7 +687,7 @@ function testUnifiedDnsSnifferOnlyMode() {
     () => config,
     (sb) => {
       sb.USER_OPTIONS.overrideMode = "dns-sniffer-only";
-      sb.MIYA_CREDENTIALS = {
+      sb.RESIDENTIAL_CREDENTIALS = {
         username: "", password: "",
         transit: { server: "", port: 8001 }
       };
@@ -683,7 +698,7 @@ function testUnifiedDnsSnifferOnlyMode() {
   assert.deepEqual(output.proxies, inputProxies);
   assert.deepEqual(output["proxy-groups"], inputProxyGroups);
   assert.deepEqual(output.rules, inputRules);
-  assert.strictEqual(output._miya, undefined);
+  assert.strictEqual(output._residential, undefined);
   assert.strictEqual(output.dns.enable, true);
   assert.strictEqual(output.sniffer.enable, true);
   assertNameserverPolicyValues(output, [dnsBase.domesticGeosite], dnsBase.domestic);
@@ -696,13 +711,6 @@ function testUnifiedDnsSnifferOnlyMode() {
   assertIncludes(output.sniffer["skip-domain"], ["+.push.apple.com", "+.tailscale.com"], "dns-only sniffer.skip-domain");
 }
 
-function testDisableBrowserProcessProxy() {
-  const { sandbox, state, output } = runMain(null, (sb) => {
-    sb.USER_OPTIONS.routeBrowserToResidentialExit = false;
-  });
-  assertProcessRules(output, false, derivedBrowserProcessNames(state), sandbox.UI_GROUPS.ai);
-}
-
 function testAiCliProcessProxyDefaultsOn() {
   const { sandbox, state, output } = runMain();
   assertProcessRules(output, true, derivedAiCliProcessNames(state), sandbox.UI_GROUPS.ai);
@@ -710,9 +718,7 @@ function testAiCliProcessProxyDefaultsOn() {
 }
 
 function testAiCliProcessProxyAlwaysOn() {
-  const { sandbox, state, output } = runMain(null, (sb) => {
-    sb.USER_OPTIONS.routeBrowserToResidentialExit = false;
-  });
+  const { sandbox, state, output } = runMain();
   assertProcessRules(output, true, derivedAiCliProcessNames(state), sandbox.UI_GROUPS.ai);
 }
 
@@ -797,17 +803,15 @@ function testRepeatedRunDoesNotCreateSelfReference() {
   }
 }
 
-function testBrowserOverrideAndRegionGroups() {
-  const { sandbox, dnsBase, output } = runMain(null, (sb) => {
-    sb.USER_OPTIONS.routeBrowserToResidentialExit = false;
-  });
+function testRegionGroupsKeepBrowserRouting() {
+  const { sandbox, dnsBase, state, output } = runMain();
   const suffix = sandbox.BASE.groupNameSuffixes;
   const usRelay = regionGroupName(sandbox, "US", suffix.base);
 
-  assert.strictEqual(output._miya, undefined);
+  assert.strictEqual(output._residential, undefined);
   assert(findGroup(output, usRelay), "US region group missing");
   assertNameserverPolicyValues(output, [dnsBase.domesticGeosite], dnsBase.domestic);
-  assertProcessRules(output, false, derivedBrowserProcessNames({ derived: sandbox.DNS_SNIFFER_MODULE.DERIVED }), sandbox.UI_GROUPS.ai);
+  assertProcessRules(output, true, derivedBrowserProcessNames(state), sandbox.UI_GROUPS.ai);
 }
 
 // 订阅只含 HK 节点时仍应生成 HK 分区测速组，不要求任何自动前跳。
@@ -867,7 +871,7 @@ function testRegionRegexAcceptsUnderscoreAndNoSeparator() {
 // 保证 main 要么完整成功要么完整无副作用，避免 Clash Verge 看到半写入配置。
 function testMergedModeDoesNotMutateDnsWhenCredentialsMissing() {
   const sandbox = loadCombinedSandbox();
-  sandbox.MIYA_CREDENTIALS = {
+  sandbox.RESIDENTIAL_CREDENTIALS = {
     username: "", password: "",
     transit: { server: "", port: 8001 }
   };
@@ -875,7 +879,7 @@ function testMergedModeDoesNotMutateDnsWhenCredentialsMissing() {
   const beforeDns = config.dns;
   const beforeSniffer = config.sniffer;
 
-  assert.throws(() => sandbox.main(config), /MIYA_CREDENTIALS/);
+  assert.throws(() => sandbox.main(config), /RESIDENTIAL_CREDENTIALS/);
 
   assert.strictEqual(config.dns, beforeDns, "config.dns should not be mutated on preflight failure");
   assert.strictEqual(config.sniffer, beforeSniffer, "config.sniffer should not be mutated on preflight failure");
@@ -893,19 +897,20 @@ const unitTests = [
   testNormalizeOverrideMode,
   testVersionSingleDefinition,
   testCoreGroupDefinition,
+  testNoProviderBrandInScript,
+  testNoSeparateBrowserRoutingOption,
   testFakeIpBypassConstant,
   testDnsConfigContainsFakeIpBypass,
-  testHasConfiguredMiyaCredentialsPort,
+  testHasConfiguredResidentialCredentialsPort,
   testValidProxyTypesConstant,
-  testBuildMiyaProxyTypeValidation,
+  testBuildResidentialProxyTypeValidation,
 ];
 
 const integrationTests = [
   testDefaultConfig,
-  testRequiresConfiguredMiyaCredentials,
+  testRequiresConfiguredResidentialCredentials,
   testMergedModeDoesNotRequireRegionNodes,
   testUnifiedDnsSnifferOnlyMode,
-  testDisableBrowserProcessProxy,
   testAiCliProcessProxyDefaultsOn,
   testAiCliProcessProxyAlwaysOn,
   testOnlyAiAndBrowserProcessesAreManaged,
@@ -915,7 +920,7 @@ const integrationTests = [
   testBadExternalRegionGroupIsNotReused,
   testNodeSelectionKeepsManagedRegionGroups,
   testRepeatedRunDoesNotCreateSelfReference,
-  testBrowserOverrideAndRegionGroups,
+  testRegionGroupsKeepBrowserRouting,
   testRegionGroupsCanBeGeneratedFromHKOnly,
   testRegionRegexAcceptsEnglishFullName,
   testRegionRegexAcceptsUnderscoreAndNoSeparator,

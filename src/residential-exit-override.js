@@ -1,7 +1,7 @@
 // 家宽 IP 官方中转 — 单文件合并版
 //
 // 使用方式：将此文件作为 Clash 覆写脚本导入。
-// 请在下面的 MIYA_CREDENTIALS 和 USER_OPTIONS 中填写你的配置。
+// 请在下面的 RESIDENTIAL_CREDENTIALS 和 USER_OPTIONS 中填写你的配置。
 // 兼容性：Clash Verge / Clash Party 的 JavaScriptCore；只用 ES5 语法。
 //
 // 单文件说明：由旧 config + override 两个入口合并而来。
@@ -14,11 +14,10 @@
 
 var USER_OPTIONS = {
   // overrideMode: "dns-sniffer-only", // dns-sniffer-only = 只写 DNS/Sniffer
-  overrideMode: "merged", // merged = DNS/Sniffer + 家宽/媒体分流
-  routeBrowserToResidentialExit: true // 是否让 AI 浏览器按应用名继续强制走家宽出口
+  overrideMode: "merged" // merged = DNS/Sniffer + 家宽/媒体分流
 };
 
-var MIYA_CREDENTIALS = {
+var RESIDENTIAL_CREDENTIALS = {
   username: "",
   password: "",
   transit: {
@@ -1272,7 +1271,7 @@ function buildDerivedPatterns() {
 // 从 RESIDENTIAL_EXIT.apps 展开出三类进程入口：
 //   aiApps  → 受管 AI 桌面 App + 显式 helper（始终走家宽出口面板）
 //   aiCli   → AI 命令行（始终走家宽出口面板）
-//   browser → AI 浏览器 + 全部 helper（是否启用由 USER_OPTIONS 决定）
+//   browser → AI 浏览器 + 全部 helper（并入 AI 高敏阵列）
 function buildDerivedProcessNames() {
   return {
     aiApps: expandProcessNamesWithHelpers(
@@ -1486,7 +1485,7 @@ var BASE = {
     TW: { regex: /🇹🇼|台湾|Taiwan|^TW(?:[|丨\-_ ]|\d)/i, label: "台湾", flag: "🇹🇼" }
   },
   nodeNames: {
-    transit: "MiyaIP（官方中转）"
+    transit: "家宽出口（官方中转）"
   },
   groupNames: {
     nodeSelection: "办公娱乐好帮手" // 适配用户当前订阅里托管的全局选择组
@@ -1498,7 +1497,7 @@ var BASE = {
     match: "MATCH," // Clash 兜底规则固定前缀
   },
   urlTestProbeUrl: "http://www.gstatic.com/generate_204",
-  miyaProxyNameKeyword: "MiyaIP",
+  residentialProxyNameKeyword: "家宽出口",
   groupNameSuffixes: {
     base: "节点组"
   },
@@ -1506,14 +1505,9 @@ var BASE = {
     base: "az.分区测速."
   },
   residentialGroupName: "az.核心出口.🏠 家宽出口",
-  // Clash 支持的合法代理类型；buildMiyaProxy 会校验硬编码类型在此白名单内。
+  // Clash 支持的合法代理类型；buildResidentialProxy 会校验硬编码类型在此白名单内。
   validProxyTypes: ["http", "https", "socks5", "ss", "ssr", "vmess", "trojan", "vless", "hysteria", "tuic", "snell", "wireguard"]
 };
-
-// 是否让受管 AI 浏览器继续按应用名强制走家宽出口。
-function shouldRouteBrowserToResidentialExit() {
-  return ACTIVE_USER_OPTIONS.routeBrowserToResidentialExit !== false;
-}
 
 // ===========================================================================
 // 5. 代理出口与选区
@@ -1548,19 +1542,19 @@ function buildRegionGroupName(regionMeta, groupNameSuffix) {
   return BASE.groupNamePrefixes.base + regionMeta.flag + " " + regionMeta.label + groupNameSuffix;
 }
 
-// 根据凭证和端点信息生成一个 MiyaIP HTTP 代理节点。
+// 根据凭证和端点信息生成一个 家宽出口 HTTP 代理节点。
 // 硬编码 type:"http" 在加载期校验：确保 "http" 在 BASE.validProxyTypes 白名单内。
-function buildMiyaProxy(miyaCredentials, proxyName, endpoint) {
+function buildResidentialProxy(residentialCredentials, proxyName, endpoint) {
   if (BASE.validProxyTypes.indexOf("http") < 0) {
-    throw createUserError("MiyaIP 代理类型 http 不在 Clash 合法代理类型列表中，请检查 BASE.validProxyTypes");
+    throw createUserError("家宽出口代理类型 http 不在 Clash 合法代理类型列表中，请检查 BASE.validProxyTypes");
   }
   return {
     name: proxyName,
     type: "http",
     server: endpoint.server,
     port: endpoint.port,
-    username: miyaCredentials.username,
-    password: miyaCredentials.password,
+    username: residentialCredentials.username,
+    password: residentialCredentials.password,
     udp: true
   };
 }
@@ -1611,14 +1605,14 @@ function hasProxyOrGroup(config, targetName) {
   );
 }
 
-// 收集匹配地区特征且非 MiyaIP 的节点名称列表。
+// 收集匹配地区特征且非 家宽出口 的节点名称列表。
 function collectRegionNodeNames(proxies, regionRegex) {
   var regionNodeNames = [];
   for (var i = 0; i < proxies.length; i++) {
     var proxy = proxies[i];
     if (
       regionRegex.test(proxy.name) &&
-      proxy.name.indexOf(BASE.miyaProxyNameKeyword) < 0
+      proxy.name.indexOf(BASE.residentialProxyNameKeyword) < 0
     ) {
       regionNodeNames.push(proxy.name);
     }
@@ -1648,11 +1642,11 @@ function writeManagedGroupIntoNodeSelection(config, managedGroupName) {
   nodeSelectionGroup.proxies = uniqueStrings(nextProxyNames);
 }
 
-// 注入 MiyaIP 官方中转节点。
-function writeMiyaProxies(config, miyaCredentials) {
+// 注入 家宽出口 官方中转节点。
+function writeResidentialProxies(config, residentialCredentials) {
   upsertNamedItem(
     config.proxies,
-    buildMiyaProxy(miyaCredentials, BASE.nodeNames.transit, miyaCredentials.transit)
+    buildResidentialProxy(residentialCredentials, BASE.nodeNames.transit, residentialCredentials.transit)
   );
 }
 
@@ -1673,7 +1667,7 @@ function writeRegionGroup(config, region, groupNameSuffix) {
   return groupName;
 }
 
-// 创建家宽出口 select 组（仅保留 MiyaIP 官方中转）。
+// 创建家宽出口 select 组（仅保留 家宽出口 官方中转）。
 function writeResidentialGroup(config) {
   var residentialGroupName = BASE.residentialGroupName;
 
@@ -1878,12 +1872,6 @@ function buildStrictProcessGroups(derived) {
   return [derived.processNames.aiApps, derived.processNames.aiCli];
 }
 
-// 按当前用户选项返回应纳入家宽出口面板的浏览器进程分组。
-function buildBrowserResidentialProcessGroups(derived) {
-  if (!shouldRouteBrowserToResidentialExit()) return [];
-  return [derived.processNames.browser];
-}
-
 // 生成家宽出口域名规则：AI / 支撑平台 / 集成服务显式锁定到家宽出口面板。
 function buildResidentialDomainRules(derived) {
   var ruleLines = [];
@@ -1910,7 +1898,7 @@ function buildProxyRules(derived) {
 // 生成浏览器进程规则，承载按应用名强制分流的 AI 浏览器进程。
 function buildBrowserResidentialRules(derived) {
   var ruleLines = [];
-  appendProcessRuleGroups(ruleLines, buildBrowserResidentialProcessGroups(derived), UI_GROUPS.ai); // 统一丢向 AI 可视化面板
+  appendProcessRuleGroups(ruleLines, [derived.processNames.browser], UI_GROUPS.ai); // 统一丢向 AI 高敏阵列
   return ruleLines;
 }
 
@@ -1987,7 +1975,7 @@ function assertTransitBindings(config) {
   var transitProxy = findProxyByName(config.proxies, BASE.nodeNames.transit);
   if (!transitProxy) {
     throw createUserError(
-      "官方中转节点状态异常，请检查 MIYA_CREDENTIALS 和节点注入逻辑"
+      "官方中转节点状态异常，请检查 RESIDENTIAL_CREDENTIALS 和节点注入逻辑"
     );
   }
 }
@@ -2030,7 +2018,7 @@ function validateManagedRouting(config, routingTargets, derived) {
   var validationTargets = buildRoutingValidationTargets(derived);
   // 断言规则落在正确的 UI 分组中
   assertRuleTargetBatchExpanded(ruleLineLookup, validationTargets.strict, [UI_GROUPS.ai, UI_GROUPS.support, UI_GROUPS.integrations]);
-  assertRuleTargetBatchExpanded(ruleLineLookup, shouldRouteBrowserToResidentialExit() ? validationTargets.browser : [], [UI_GROUPS.ai]);
+  assertRuleTargetBatchExpanded(ruleLineLookup, validationTargets.browser, [UI_GROUPS.ai]);
   assertRuleTargetBatchExpanded(ruleLineLookup, validationTargets.media, [UI_GROUPS.video, UI_GROUPS.music, UI_GROUPS.social, UI_GROUPS.im]);
 }
 
@@ -2065,12 +2053,12 @@ function buildProcessValidationTargets(processNames) {
   return buildValidationTargets("PROCESS-NAME", processNames);
 }
 
-// 家宽出口入口。装配顺序：容器 → MiyaIP 节点 → 路由目标 → 规则 → 校验。
-function applyResidentialExit(config, derived, miyaCredentials) {
+// 家宽出口入口。装配顺序：容器 → 家宽出口 节点 → 路由目标 → 规则 → 校验。
+function applyResidentialExit(config, derived, residentialCredentials) {
   var routingTargets;
 
   writeContainers(config); // 初始化基础容器
-  writeMiyaProxies(config, miyaCredentials); // 注入 MiyaIP 节点
+  writeResidentialProxies(config, residentialCredentials); // 注入 家宽出口 节点
 
   routingTargets = resolveRoutingTargets(config); // 解析链路目标
   writeManagedRouting(config, routingTargets, derived); // 写入拨号与规则
@@ -2083,7 +2071,7 @@ function applyResidentialExit(config, derived, miyaCredentials) {
 // 8. 一体化覆写入口（合并版）
 // ===========================================================================
 
-function hasConfiguredMiyaCredentials(credentials) {
+function hasConfiguredResidentialCredentials(credentials) {
   return !!(
     credentials &&
     typeof credentials.username === "string" && credentials.username !== "" &&
@@ -2094,7 +2082,7 @@ function hasConfiguredMiyaCredentials(credentials) {
   );
 }
 
-function cloneMiyaCredentials(credentials) {
+function cloneResidentialCredentials(credentials) {
   return {
     username: credentials.username,
     password: credentials.password,
@@ -2107,8 +2095,7 @@ function cloneMiyaCredentials(credentials) {
 
 function cloneUserOptions(options) {
   return {
-    overrideMode: options.overrideMode,
-    routeBrowserToResidentialExit: options.routeBrowserToResidentialExit
+    overrideMode: options.overrideMode
   };
 }
 
@@ -2146,12 +2133,12 @@ function shouldApplyOnlyDnsAndSniffer() {
   return normalizeOverrideMode(ACTIVE_USER_OPTIONS.overrideMode) === "dns-sniffer-only";
 }
 
-function resolveConfiguredMiyaCredentials(credentials) {
-  if (hasConfiguredMiyaCredentials(credentials)) {
-    return cloneMiyaCredentials(credentials);
+function resolveConfiguredResidentialCredentials(credentials) {
+  if (hasConfiguredResidentialCredentials(credentials)) {
+    return cloneResidentialCredentials(credentials);
   }
   throw createUserError(
-    "请先填写 MIYA_CREDENTIALS 中的用户名、密码和官方中转端点"
+    "请先填写 RESIDENTIAL_CREDENTIALS 中的用户名、密码和官方中转端点"
   );
 }
 
@@ -2160,17 +2147,17 @@ function resolveConfiguredMiyaCredentials(credentials) {
 // 设计动机：main 中途抛错会被 Clash Verge 视为脚本失败 → 整体回退到原 profile，
 // 用户感知是"脚本完全没生效"。前置校验避免写 DNS 后却因缺凭证抛错的中间态。
 function preflightMergedMode(config) {
-  var credentials = resolveConfiguredMiyaCredentials(MIYA_CREDENTIALS);
+  var credentials = resolveConfiguredResidentialCredentials(RESIDENTIAL_CREDENTIALS);
   return credentials;
 }
 
 function main(config) {
-  var miyaCredentials = null;
+  var residentialCredentials = null;
 
   ACTIVE_USER_OPTIONS = cloneUserOptions(USER_OPTIONS);
 
   if (!shouldApplyOnlyDnsAndSniffer()) {
-    miyaCredentials = preflightMergedMode(config);
+    residentialCredentials = preflightMergedMode(config);
   }
 
   DNS_SNIFFER_MODULE.apply(config);
@@ -2178,5 +2165,5 @@ function main(config) {
     return config;
   }
 
-  return applyResidentialExit(config, DNS_SNIFFER_MODULE.DERIVED, miyaCredentials);
+  return applyResidentialExit(config, DNS_SNIFFER_MODULE.DERIVED, residentialCredentials);
 }
