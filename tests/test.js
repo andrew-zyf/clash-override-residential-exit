@@ -1,6 +1,6 @@
-// 家宽出口覆写 — 合并测试套件
+// MiyaIP 家宽出口覆写 — 测试套件
 //
-// 测试 residential-chain-proxy-combined.js 的纯函数与端到端行为。
+// 测试 miya-residential-exit-override.js 的纯函数与端到端行为。
 // 运行：node tests/test.js
 
 const assert = require("assert");
@@ -8,8 +8,8 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 
-const combinedPath = path.join(__dirname, "..", "src", "residential-chain-proxy-combined.js");
-const combinedCode = fs.readFileSync(combinedPath, "utf8");
+const overridePath = path.join(__dirname, "..", "src", "miya-residential-exit-override.js");
+const overrideCode = fs.readFileSync(overridePath, "utf8");
 
 const TEST_MIYA_CREDENTIALS = {
   username: "user",
@@ -24,7 +24,7 @@ const TEST_MIYA_CREDENTIALS = {
 function loadCombinedSandbox() {
   const sandbox = { console, Object, Array, String, Error };
   vm.createContext(sandbox);
-  vm.runInContext(combinedCode, sandbox, { filename: combinedPath });
+  vm.runInContext(overrideCode, sandbox, { filename: overridePath });
   return sandbox;
 }
 
@@ -85,14 +85,14 @@ function expectedGroupNames(sandbox) {
   const suffix = sandbox.BASE.groupNameSuffixes;
   return {
     sgRegion: regionGroupName(sandbox, "SG", suffix.base),
-    chainTarget: sandbox.BASE.chainGroupName,
+    residentialTarget: sandbox.BASE.residentialGroupName,
     usRegion: regionGroupName(sandbox, "US", suffix.base)
   };
 }
 
 function expectedManualDispatchChoices(output, sandbox) {
   const suffix = sandbox.BASE.groupNameSuffixes;
-  const choices = [sandbox.BASE.chainGroupName];
+  const choices = [sandbox.BASE.residentialGroupName];
   for (const code of ["US", "HK", "JP", "TW", "SG"]) {
     const groupName = regionGroupName(sandbox, code, suffix.base);
     if (findGroup(output, groupName)) choices.push(groupName);
@@ -268,9 +268,9 @@ function testNormalizeOverrideMode() {
 
 // ---- script version marker ----
 function testVersionSingleDefinition() {
-  assert(combinedCode.includes("// @version 11.9"), "Expected @version 11.9");
-  const versionLines = combinedCode.split('\n').filter((l) =>
-    l.includes("@version ") || l.includes("CHAIN_PROXY_STATE_VERSION")
+  assert(overrideCode.includes("// @version 12.0"), "Expected @version 12.0");
+  const versionLines = overrideCode.split('\n').filter((l) =>
+    l.includes("@version ")
   );
   assert.strictEqual(versionLines.length, 1, "Expected one script version marker");
   console.log("  PASS single version definition");
@@ -278,13 +278,9 @@ function testVersionSingleDefinition() {
 
 // ---- core group definition ----
 function testCoreGroupDefinition() {
-  assert.strictEqual(S.BASE.chainGroupName, "az.核心链路.🔗 家宽出口");
+  assert.strictEqual(S.BASE.residentialGroupName, "az.核心出口.🏠 家宽出口");
 
   const { output } = runMain();
-  assert.strictEqual(findProxy(output, "自选节点 => 家宽IP"), undefined);
-  assert.strictEqual(findProxy(output, "自选节点 + 家宽IP"), undefined);
-  assert.strictEqual(findGroup(output, "az.核心链路.🔗 链式代理-家宽出口"), undefined);
-  assert.strictEqual(findGroup(output, "az.核心链路.d链式代理-家宽出口"), undefined);
   console.log("  PASS core group definition");
 }
 
@@ -334,11 +330,6 @@ function testHasConfiguredMiyaCredentialsPort() {
   }), true);
   assert.strictEqual(fn({
     username: "u", password: "p",
-    transit: { server: "5.6.7.8", port: 443 }
-  }), true);
-  assert.strictEqual(fn({
-    username: "u", password: "p",
-    relay: { server: "", port: "bad" },
     transit: { server: "5.6.7.8", port: 443 }
   }), true);
   assert.strictEqual(fn({
@@ -410,25 +401,21 @@ function assertManagedProxyTopology(output, sandbox) {
   const names = expectedGroupNames(sandbox);
   const nodeNames = sandbox.BASE.nodeNames;
 
-  assert.strictEqual(findProxy(output, "自选节点 => 家宽IP"), undefined);
-  assert.strictEqual(findProxy(output, "自选节点 + 家宽IP"), undefined);
-
   const transitProxy = findProxy(output, nodeNames.transit);
   assert(transitProxy, "transit proxy missing");
   assert.strictEqual(transitProxy.type, "http");
   assert.strictEqual(transitProxy.server, TEST_MIYA_CREDENTIALS.transit.server);
-  assert.strictEqual(transitProxy["dialer-proxy"], undefined);
 
   const sgGroup = findGroup(output, names.sgRegion);
   assert(sgGroup, "SG region group missing");
   assert.strictEqual(sgGroup.type, "url-test");
   assert.deepEqual(sgGroup.proxies, ["🇸🇬 SG Auto 01"]);
 
-  const chainGroup = findGroup(output, names.chainTarget);
-  assert(chainGroup, "chain group missing");
-  assert.strictEqual(chainGroup.type, "select");
-  assert(sameSet(chainGroup.proxies, [nodeNames.transit]),
-    "chain group members mismatch");
+  const residentialGroup = findGroup(output, names.residentialTarget);
+  assert(residentialGroup, "residential group missing");
+  assert.strictEqual(residentialGroup.type, "select");
+  assert(sameSet(residentialGroup.proxies, [nodeNames.transit]),
+    "residential group members mismatch");
 
   assertManualDispatchGroups(output, sandbox);
 
@@ -444,10 +431,6 @@ function assertManagedProxyTopology(output, sandbox) {
     ["🇸🇬 SG Auto 01", names.sgRegion, names.usRegion],
     "node selection includes"
   );
-  assert(!nodeSelection.proxies.includes("az.核心链路.🔗 链式代理-家宽出口"),
-    "node selection should not keep old chain group");
-  assert(!nodeSelection.proxies.includes("自选节点 => 家宽IP"),
-    "node selection should not keep old relay node");
 }
 
 function assertManualDispatchGroups(output, sandbox) {
@@ -645,8 +628,6 @@ function assertDnsAndSniffer(output, dnsBase) {
 
 function testDefaultConfig() {
   const { sandbox, state, dnsBase, output } = runMain();
-  assert.strictEqual(output._azChainProxyState, undefined);
-  assert.strictEqual(output._azChainProxyUserConfig, undefined);
   assert.strictEqual(output._miya, undefined);
   assertManagedProxyTopology(output, sandbox);
   assertCoreStrictRouting(output, sandbox);
@@ -676,9 +657,9 @@ function testMergedModeDoesNotRequireRegionNodes() {
       { name: "办公娱乐好帮手", type: "select", proxies: [] }
     ];
   });
-  const chainGroup = findGroup(output, sandbox.BASE.chainGroupName);
-  assert(chainGroup, "core group missing without region nodes");
-  assert.deepEqual(chainGroup.proxies, [sandbox.BASE.nodeNames.transit]);
+  const residentialGroup = findGroup(output, sandbox.BASE.residentialGroupName);
+  assert(residentialGroup, "core group missing without region nodes");
+  assert.deepEqual(residentialGroup.proxies, [sandbox.BASE.nodeNames.transit]);
 }
 
 function testUnifiedDnsSnifferOnlyMode() {
@@ -703,8 +684,6 @@ function testUnifiedDnsSnifferOnlyMode() {
   assert.deepEqual(output["proxy-groups"], inputProxyGroups);
   assert.deepEqual(output.rules, inputRules);
   assert.strictEqual(output._miya, undefined);
-  assert.strictEqual(output._azChainProxyState, undefined);
-  assert.strictEqual(output._azChainProxyUserConfig, undefined);
   assert.strictEqual(output.dns.enable, true);
   assert.strictEqual(output.sniffer.enable, true);
   assertNameserverPolicyValues(output, [dnsBase.domesticGeosite], dnsBase.domestic);
@@ -719,7 +698,7 @@ function testUnifiedDnsSnifferOnlyMode() {
 
 function testDisableBrowserProcessProxy() {
   const { sandbox, state, output } = runMain(null, (sb) => {
-    sb.USER_OPTIONS.routeBrowserToChain = false;
+    sb.USER_OPTIONS.routeBrowserToResidentialExit = false;
   });
   assertProcessRules(output, false, derivedBrowserProcessNames(state), sandbox.UI_GROUPS.ai);
 }
@@ -732,7 +711,7 @@ function testAiCliProcessProxyDefaultsOn() {
 
 function testAiCliProcessProxyAlwaysOn() {
   const { sandbox, state, output } = runMain(null, (sb) => {
-    sb.USER_OPTIONS.routeBrowserToChain = false;
+    sb.USER_OPTIONS.routeBrowserToResidentialExit = false;
   });
   assertProcessRules(output, true, derivedAiCliProcessNames(state), sandbox.UI_GROUPS.ai);
 }
@@ -767,37 +746,23 @@ function testExistingManagedObjectsAreReconciled() {
     const suffix = base.groupNameSuffixes;
 
     config.proxies.push({
-      name: "自选节点 => 家宽IP", type: "http", server: "bad", port: 1,
-      username: "bad", password: "bad", udp: false, "dialer-proxy": "错误目标"
-    });
-    config.proxies.push({
       name: nodeNames.transit, type: "http", server: "bad", port: 2,
-      username: "bad", password: "bad", udp: false, "dialer-proxy": "错误目标"
+      username: "bad", password: "bad", udp: false
     });
-    config["proxy-groups"][0].proxies = [
-      "🇸🇬 SG Auto 01",
-      "az.核心链路.🔗 链式代理-家宽出口",
-      "自选节点 => 家宽IP"
-    ];
-    config["proxy-groups"].push({
-      name: "az.核心链路.🔗 链式代理-家宽出口",
-      type: "select",
-      proxies: ["自选节点 => 家宽IP"]
-    });
-    config["proxy-groups"].push({ name: "SG" + suffix.base, type: "select", proxies: [base.chainGroupName] });
-    config["proxy-groups"].push({ name: base.chainGroupName, type: "select", proxies: ["DIRECT"] });
+    config["proxy-groups"].push({ name: "SG" + suffix.base, type: "select", proxies: [base.residentialGroupName] });
+    config["proxy-groups"].push({ name: base.residentialGroupName, type: "select", proxies: ["DIRECT"] });
     config["proxy-groups"].push({ name: "US" + suffix.base, type: "select", proxies: ["DIRECT"] });
   });
   assertManagedProxyTopology(output, sandbox);
 }
 
-function testCoreGroupReconcilesLegacyRelayMember() {
+function testResidentialGroupIsReconciled() {
   const { sandbox, output } = runMain((config) => {
     const base = loadCombinedSandbox().BASE;
-    const chainName = base.chainGroupName;
+    const residentialName = base.residentialGroupName;
     config["proxy-groups"].push({
-      name: chainName, type: "select",
-      proxies: [base.nodeNames.transit, "自选节点 => 家宽IP"]
+      name: residentialName, type: "select",
+      proxies: ["DIRECT"]
     });
   });
   assertManagedProxyTopology(output, sandbox);
@@ -814,8 +779,7 @@ function testBadExternalRegionGroupIsNotReused() {
 
 function testNodeSelectionKeepsManagedRegionGroups() {
   const { sandbox, output } = runMain((config) => {
-    const staleRelay = "旧链式跳板组";
-    config["proxy-groups"][0].proxies = ["🇸🇬 SG Auto 01", staleRelay];
+    config["proxy-groups"][0].proxies = ["🇸🇬 SG Auto 01"];
   });
   assertManagedProxyTopology(output, sandbox);
 }
@@ -827,7 +791,7 @@ function testRepeatedRunDoesNotCreateSelfReference() {
   const names = expectedGroupNames(sandbox);
 
   assertManagedProxyTopology(second, sandbox);
-  for (const name of [names.chainTarget, names.sgRegion, names.usRegion]) {
+  for (const name of [names.residentialTarget, names.sgRegion, names.usRegion]) {
     const count = second["proxy-groups"].filter((g) => g.name === name).length;
     assert.strictEqual(count, 1, "duplicate group after rerun: " + name);
   }
@@ -835,13 +799,12 @@ function testRepeatedRunDoesNotCreateSelfReference() {
 
 function testBrowserOverrideAndRegionGroups() {
   const { sandbox, dnsBase, output } = runMain(null, (sb) => {
-    sb.USER_OPTIONS.routeBrowserToChain = false;
+    sb.USER_OPTIONS.routeBrowserToResidentialExit = false;
   });
   const suffix = sandbox.BASE.groupNameSuffixes;
   const usRelay = regionGroupName(sandbox, "US", suffix.base);
 
   assert.strictEqual(output._miya, undefined);
-  assert.strictEqual(output._azChainProxyUserConfig, undefined);
   assert(findGroup(output, usRelay), "US region group missing");
   assertNameserverPolicyValues(output, [dnsBase.domesticGeosite], dnsBase.domestic);
   assertProcessRules(output, false, derivedBrowserProcessNames({ derived: sandbox.DNS_SNIFFER_MODULE.DERIVED }), sandbox.UI_GROUPS.ai);
@@ -948,7 +911,7 @@ const integrationTests = [
   testOnlyAiAndBrowserProcessesAreManaged,
   testMissingStrictTargetFails,
   testExistingManagedObjectsAreReconciled,
-  testCoreGroupReconcilesLegacyRelayMember,
+  testResidentialGroupIsReconciled,
   testBadExternalRegionGroupIsNotReused,
   testNodeSelectionKeepsManagedRegionGroups,
   testRepeatedRunDoesNotCreateSelfReference,

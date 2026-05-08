@@ -1,131 +1,138 @@
-# clash-override-chain-proxy
+# clash-override-miya-residential-exit
 
-![Project cover](img/hero-cover.png)
+Clash 覆写脚本。通过 `MiyaIP（官方中转）` 提供固定家宽出口，并把 AI、开发平台、支付验证、遥测等高敏流量集中到可手动切换的调度面板里，降低出口 IP 不一致带来的风控风险。
 
-> Clash 覆写脚本，通过 MiyaIP 官方中转将 AI 相关流量锁定到干净的家宽 IP，防止 IP 指纹不一致导致的账号封禁。
-
-AI 平台（OpenAI、Anthropic 等）的风控系统会追踪 IP 指纹一致性。当 Stripe 支付、Arkose 验证、Statsig 遥测等关联请求的出口 IP 与主会话不一致时，账号容易被判定违规。常见原因包括：共享代理 IP 信誉差、DNS 泄漏、WebRTC 泄漏等。
-
-本脚本的解决方案：**MiyaIP 官方中转提供家宽出口，分区测速组保留为手动备选**，通过三层防泄漏机制确保所有 AI 相关流量（含登录验证、支付、遥测）始终从同一个家宽 IP 出站。
-
-**当前版本：** v11.9
+**当前版本：** v12.0
 
 ## Features
 
-- **IP 隔离** — AI 流量（含登录验证、支付、遥测等关联请求）+ 开发平台流量锁定到家宽出口，确保 IP 指纹一致
-- **媒体分离** — 视频 / 音乐 / 社交 / IM 流量走独立选区，不占用家宽带宽，可按地区自由切换
-- **直连分类** — 域内服务、Apple、私有网络等走直连，CN 站点用 `GEOSITE` / `GEOIP` 兜底
-- **统一策略引擎** — 所有路由 / DNS / Sniffer 决策汇总到 POLICY 一张表，覆盖订阅自带规则
-
-完整的流量分类和出口映射见 [路由对照表](#路由对照表)。
+- **固定家宽出口**：`az.核心出口.🏠 家宽出口` 只包含 `MiyaIP（官方中转）`。
+- **手动调度面板**：所有 `az.*调度.*` 组默认候选为家宽出口 + 已生成的分区测速组，不包含订阅原始总选择组。
+- **分区测速备选**：自动生成 `US / JP / HK / SG / TW` 中订阅实际存在的地区测速组。
+- **DNS / Sniffer 防漏**：DNS、Fake-IP、Sniffer 和规则都由同一份 `POLICY` 派生。
+- **媒体分离**：视频、音乐、社交、IM 可在独立调度面板中手动选择出口。
 
 ## Quick Start
 
-1. 下载 [`src/residential-chain-proxy-combined.js`](src/residential-chain-proxy-combined.js)
-2. 打开文件，设置顶部的 `USER_OPTIONS.overrideMode`：
-   - 只改善 DNS/嗅探 → `"dns-sniffer-only"`（不需家宽）
-   - 完整家宽出口 → `"merged"`，并填入 `MIYA_CREDENTIALS`
-3. 在 Clash 覆写页导入并启用这一个文件即可
-4. 切到机场订阅 → 规则模式 + TUN 模式 → 启动
-
-详见下方 [Usage](#usage) 完整步骤。
+1. 下载 [`src/miya-residential-exit-override.js`](src/miya-residential-exit-override.js)。
+2. 打开文件，填写 `MIYA_CREDENTIALS`。
+3. 按需调整 `USER_OPTIONS.overrideMode` 和 `routeBrowserToResidentialExit`。
+4. 在 Clash 覆写页导入并启用这个文件。
+5. 使用规则模式和 TUN 模式启动。
 
 ## Requirements
 
-- [Clash Verge](https://github.com/clash-verge-rev/clash-verge-rev) 或其他兼容 JavaScriptCore 覆写的 Clash 客户端
-- 一份代理订阅，至少包含 `US / JP / HK / SG / TW` 任一个地区的节点
-- `overrideMode: "merged"` 需要一份 MiyaIP 官方中转端点
-- Node.js（仅 `tests/test.js` 用，不是运行时依赖）
+- Clash Verge 或其他兼容 JavaScriptCore 覆写的 Clash 客户端。
+- 一份代理订阅，最好包含 `US / JP / HK / SG / TW` 中至少一个地区节点，用作手动备选。
+- `merged` 模式需要 MiyaIP 官方中转端点。
+- Node.js 仅用于运行测试。
 
-示例资源（可选）：代理订阅 [办公娱乐好帮手](https://xn--9kq10e0y7h.site/index.html?register=twb6RIec) · 家宽 IP [MiyaIP](https://www.miyaip.com/?invitecode=7670643)
+## Configuration
 
-## Usage
-
-### 1. 下载覆写脚本
-
-只需下载一个文件：
-
-- [`src/residential-chain-proxy-combined.js`](src/residential-chain-proxy-combined.js) — 合并版，包含用户配置变量和实现逻辑，适配 Clash Verge 等只支持单覆写文件的环境
-
-![Override options](img/options-overview.png)
-
-### 2. 选择 `overrideMode`
-
-打开 `residential-chain-proxy-combined.js`，先改顶部 `USER_OPTIONS.overrideMode`：
+### USER_OPTIONS
 
 ```javascript
 var USER_OPTIONS = {
-  overrideMode: "merged",      // merged 或 dns-sniffer-only
-  routeBrowserToChain: true    // AI 浏览器按进程名是否也走家宽出口面板
+  // dns-sniffer-only = 只写 DNS/Sniffer
+  overrideMode: "merged",
+  routeBrowserToResidentialExit: true
 };
 ```
 
-| 模式 | 适合场景 | 行为边界 |
-|---|---|---|
-| `dns-sniffer-only` | 只想改善域内 / 域外 DNS 解析、Fake-IP 和域名嗅探，不想改现有代理组和分流规则 | 只写 `config.dns` / `config.sniffer`；不读取 `MIYA_CREDENTIALS`，不注入代理节点，不改 `proxies` / `proxy-groups` / `rules` |
-| `merged` | 需要把 AI、开发平台、支付 / 验证 / 遥测统一锁定到家宽出口，同时保留媒体分离和域内直连 | 先写 DNS / Sniffer，再写 MiyaIP 节点、代理组和分流规则 |
+| 选项 | 说明 |
+|---|---|
+| `overrideMode: "merged"` | 写入 DNS / Sniffer、MiyaIP 节点、代理组和规则 |
+| `overrideMode: "dns-sniffer-only"` | 只写入 DNS / Sniffer，不读取 MiyaIP 凭证 |
+| `routeBrowserToResidentialExit: true` | AI 浏览器进程进入 AI 调度面板 |
+| `routeBrowserToResidentialExit: false` | 不按浏览器进程名兜底，仍保留域名规则 |
 
-`dns-sniffer-only` 适合先做低风险验证：
-
-- 域内站点绑定域内 DoH：`dns.alidns.com` / `doh.pub`
-- 域外站点绑定域外 DoH：`dns.google` / `cloudflare-dns.com`
-- 开启 Fake-IP、`fallback-filter`、TLS / HTTP / QUIC Sniffer
-- 对 Tailscale / Plex / Apple Push / 局域网等保留 `skip-domain`
-
-### 3. 填写家宽凭证
-
-只有 `overrideMode: "merged"` 需要在 `residential-chain-proxy-combined.js` 顶部 `MIYA_CREDENTIALS` 填入家宽 IP 服务的账号和端点信息；`dns-sniffer-only` 可以保持空值。
+### MIYA_CREDENTIALS
 
 ```javascript
 var MIYA_CREDENTIALS = {
   username: "你的用户名",
   password: "你的密码",
-  transit: { server: "transit.example.com", port: 8001 }  // 官方中转
+  transit: {
+    server: "transit.example.com",
+    port: 8001
+  }
 };
 ```
 
-### 4. 调整出口面板选项
+## Proxy Groups
 
-| 场景 | 配置 |
-|---|---|
-| 关闭 AI 浏览器进程绑定 | `routeBrowserToChain: false` |
+`merged` 模式会注入或修正以下代理组：
 
-所有 `az.*调度.*` 面板默认提供 `az.核心链路.🔗 家宽出口` + 已存在的 `az.分区测速.*节点组`，需要临时直出时在对应面板里手动切换即可。
-
-### 5. 启用
-
-在 Clash 覆写页导入并启用 `residential-chain-proxy-combined.js`。
-
-随后切到机场订阅 → 启动代理（**规则模式** + **TUN 模式**）。不要选中 Clash Verge 原生的「DNS 覆写」和「嗅探覆写」选项，脚本已通过 POLICY 统一接管 DNS 和 Sniffer 配置。
-
-`overrideMode: "merged"` 会额外注入以下代理组：
-
-| 代理组名称 | 类型 | 说明 |
+| 代理组 | 类型 | 说明 |
 |---|---|---|
-| `az.核心链路.🔗 家宽出口` | `select` | 仅包含 `MiyaIP（官方中转）`，不再生成 `自选节点 => 家宽IP`，也不再写 `dialer-proxy` |
-| `az.分区测速.🇺🇸 美国节点组`<br>`az.分区测速.🇯🇵 日本节点组`<br>`az.分区测速.🇭🇰 香港节点组`<br>`az.分区测速.🇸🇬 新加坡节点组`<br>`az.分区测速.🇹🇼 台湾节点组` | `url-test` | 5 个地区节点池自动生成。定时测速，自动选择最低延迟节点 |
-| `az.严管调度.🤖 AI 高敏阵列` | `select` | AI 流量手动出口面板：核心链路 + 已存在分区测速组，不含 `办公娱乐好帮手` |
-| `az.严管调度.🛠️ 支撑平台` | `select` | 开发平台流量手动出口面板：核心链路 + 已存在分区测速组，不含 `办公娱乐好帮手` |
-| `az.严管调度.🛡️ 生态域集成` | `select` | 支付 / 验证 / 遥测流量手动出口面板：核心链路 + 已存在分区测速组，不含 `办公娱乐好帮手` |
-| `az.其他调度.🎬 视频流媒体` | `select` | 视频流量手动出口面板：核心链路 + 已存在分区测速组，不含 `办公娱乐好帮手` |
-| `az.其他调度.🎵 音乐播客` | `select` | 音频流量手动出口面板：核心链路 + 已存在分区测速组，不含 `办公娱乐好帮手` |
-| `az.其他调度.🌐 社交长文` | `select` | 社交平台流量手动出口面板：核心链路 + 已存在分区测速组，不含 `办公娱乐好帮手` |
-| `az.其他调度.💬 即时通讯` | `select` | IM 流量手动出口面板：核心链路 + 已存在分区测速组，不含 `办公娱乐好帮手` |
+| `az.核心出口.🏠 家宽出口` | `select` | 只包含 `MiyaIP（官方中转）` |
+| `az.分区测速.🇺🇸 美国节点组` | `url-test` | 订阅存在美国节点时生成 |
+| `az.分区测速.🇯🇵 日本节点组` | `url-test` | 订阅存在日本节点时生成 |
+| `az.分区测速.🇭🇰 香港节点组` | `url-test` | 订阅存在香港节点时生成 |
+| `az.分区测速.🇸🇬 新加坡节点组` | `url-test` | 订阅存在新加坡节点时生成 |
+| `az.分区测速.🇹🇼 台湾节点组` | `url-test` | 订阅存在台湾节点时生成 |
+| `az.严管调度.🤖 AI 高敏阵列` | `select` | AI 域名、AI App、AI CLI |
+| `az.严管调度.🛠️ 支撑平台` | `select` | Google / Microsoft / GitHub / 开发平台 / CDN 基础设施 |
+| `az.严管调度.🛡️ 生态域集成` | `select` | 反机器人、鉴权、支付、遥测 |
+| `az.其他调度.🎬 视频流媒体` | `select` | 视频流媒体 |
+| `az.其他调度.🎵 音乐播客` | `select` | 音乐与播客 |
+| `az.其他调度.🌐 社交长文` | `select` | 社交与长文平台 |
+| `az.其他调度.💬 即时通讯` | `select` | IM 服务 |
 
-![Proxy groups overview](img/proxy-groups-overview.png)
+所有调度组的候选顺序为：
 
-### FAQ
+```text
+az.核心出口.🏠 家宽出口
+az.分区测速.🇺🇸 美国节点组
+az.分区测速.🇭🇰 香港节点组
+az.分区测速.🇯🇵 日本节点组
+az.分区测速.🇹🇼 台湾节点组
+az.分区测速.🇸🇬 新加坡节点组
+```
 
-- **只想启用 DNS / Sniffer 怎么配？** 在配置文件里把 `USER_OPTIONS.overrideMode` 改成 `"dns-sniffer-only"`。此模式不会读取家宽凭证，也不会改代理组或规则。
-- **完整家宽出口怎么配？** 使用 `overrideMode: "merged"`，并在配置文件里填入 `MIYA_CREDENTIALS`。实现脚本会先完成凭证校验，再接管 DNS / Sniffer、注入 `MiyaIP（官方中转）`、代理组和分流规则。
-- **家宽链路断了怎么临时切换？** 在对应 `az.*调度.*` 面板里手动切到任意分区测速组即可直出；所有调度组都不再包含 `办公娱乐好帮手`。
-- **为什么没有 `自选节点 => 家宽IP` 了？** 这条链式 relay 已删除。现在家宽核心组只保留 `MiyaIP（官方中转）`；分区测速组只作为各调度面板里的手动备选出口。
-- **`merged` 报错 `请先填写 MIYA_CREDENTIALS...`** — 凭证仍是空值，请确认已在 `MIYA_CREDENTIALS` 中填入用户名、密码和官方中转端点。
+不存在节点的地区不会出现在候选项里。
 
-### 升级 / 卸载
+## Data Flow
 
-- **升级**：重新下载 `residential-chain-proxy-combined.js` 覆盖旧文件，并重新填入你的 `MIYA_CREDENTIALS` 和 `USER_OPTIONS`。脚本是幂等的，重复运行不会产生重复组。
-- **卸载**：关掉相关覆写，刷新订阅即可还原。
+```mermaid
+flowchart TD
+  A["用户配置"] --> B["POLICY"]
+  B --> C["DNS / Sniffer"]
+  B --> D["分流规则"]
+  E["MiyaIP 凭证"] --> F["MiyaIP（官方中转）"]
+  F --> G["az.核心出口.🏠 家宽出口"]
+  H["订阅节点"] --> I["分区测速组"]
+  G --> J["az.*调度.*"]
+  I --> J
+  D --> J
+```
+
+## DNS And Sniffer
+
+脚本启用 `enhanced-mode: fake-ip`、`respect-rules: true` 和 TLS / HTTP / QUIC Sniffer。
+
+| 配置 | 来源 | 作用 |
+|---|---|---|
+| `nameserver-policy` | `POLICY.dnsZone` | 域内、域外解析分区 |
+| `fake-ip-filter` | `POLICY.fakeIpBypass` | Apple 推送、NTP、STUN、局域网等返回真实 IP |
+| `force-domain` | `POLICY.sniffer === "force"` | 高敏域名从 SNI / Host 恢复域名，避免落到兜底 |
+| `skip-domain` | `POLICY.sniffer === "skip"` | P2P、局域网、推送等保留 IP 语义 |
+| `fallback-filter` | `POLICY.fallbackFilter` | 非 CN 结果优先走域外 DoH |
+
+## Route Sources
+
+| 源桶 | 出口面板 |
+|---|---|
+| `RESIDENTIAL_EXIT.ai` | `az.严管调度.🤖 AI 高敏阵列` |
+| `RESIDENTIAL_EXIT.support` + `CDN.cloud` | `az.严管调度.🛠️ 支撑平台` |
+| `RESIDENTIAL_EXIT.integrations` + Cloudflare | `az.严管调度.🛡️ 生态域集成` |
+| `MEDIA.video` | `az.其他调度.🎬 视频流媒体` |
+| `MEDIA.music` | `az.其他调度.🎵 音乐播客` |
+| `MEDIA.social` | `az.其他调度.🌐 社交长文` |
+| `MEDIA.im` | `az.其他调度.💬 即时通讯` |
+| `CN` / `LOCAL` / `NETWORK` | `DIRECT` |
+
+规则顺序固定为：高敏域名、媒体域名、DoH 端点、显式直连、CN 兜底、AI 进程兜底、订阅非 `MATCH` 规则、`MATCH`。
 
 ## Testing
 
@@ -133,149 +140,14 @@ var MIYA_CREDENTIALS = {
 node tests/test.js
 ```
 
-使用 `vm` 隔离加载合并脚本，覆盖 12 个纯函数单元测试 + 19 个端到端集成测试（`dns-sniffer-only` / `merged` / 凭证校验 / 分区测速组生成 / 地区名识别 / 开关组合 / 幂等重跑 / 受管对象修复 / 前置校验等）。
-
-## Architecture
-
-### 数据流
-
-![Architecture flow](img/architecture-flow.png)
-
-三层流水线：**用户配置 → 策略 → 配置**。`main(config)` 入口直接克隆顶部 `USER_OPTIONS` 到运行期状态，再根据 `overrideMode` 控制执行边界：
-
-- `dns-sniffer-only` 只消费 `DERIVED` 写入 `config.dns` / `config.sniffer`，不会读取 `MIYA_CREDENTIALS`，随后直接返回配置。
-- `merged` 先写入 `config.dns` / `config.sniffer`，再校验并克隆 `MIYA_CREDENTIALS` 到局部变量，最后消费同一份 `DERIVED` 写入代理节点、代理组和分流规则；不再通过 `_azChainProxyUserConfig` / `_miya` / `_azChainProxyState` 传递中间状态。
-
-| 模块 | 说明 |
-|---|---|
-| `residential-chain-proxy-combined.js` | 单文件入口，用户配置（`MIYA_CREDENTIALS` / `USER_OPTIONS`）与实现逻辑合并，适配 Clash Verge 等只支持单覆写文件的环境 |
-| `DNS_SNIFFER_MODULE` | DNS / Sniffer 策略模块，两种模式共用 |
-| `MIYA_CREDENTIALS` | MiyaIP 用户名、密码和官方中转端点 |
-| `USER_OPTIONS` | 模式选择 + 浏览器开关 |
-| `BASE` | 运行期常量：地区表、节点名、组名、DoH 服务器 |
-| `CHAIN` / `MEDIA` / `CDN` / `CN` / `OVERSEAS` / `LOCAL` / `DNS_ONLY` / `NETWORK` | `+.domain` 域名模式，按路由意图或解析意图分桶 |
-| `POLICY` | 单一权威表，每条 entry 声明 `route` / `dnsZone` / `sniffer` / `fakeIpBypass` / `fallbackFilter` |
-| `DERIVED` | 从 POLICY 投影的下游视图：`patterns`、`processNames`、`networkRules` |
-| `EXPECTED_ROUTES` | 端到端路由样本，加载期 + 测试共用 |
-
-### DNS 防泄漏
-
-分流规则只决定出口。DNS 解析到错误地区、TLS 握手前域名未被嗅探到，都会导致出口跑偏。脚本让 DNS / Sniffer / 分流规则三层共用同一份 POLICY，改一处全同步：
-
-| DNS 分区 | DoH 服务器 | 用途 |
-|---|---|---|
-| 域外 DoH | `dns.google` / `cloudflare-dns.com` | AI、开发平台、媒体等域外域名，走代理在境外解析 |
-| 域内 DoH | `dns.alidns.com` / `doh.pub` | 办公、云、消费类等域内域名，本地直接解析 |
-
-`nameserver-policy` 先写入大类兜底，再写入显式域名：
-
-| 层级 | 匹配 | DNS |
-|---|---|---|
-| 域内大类 | `geosite:cn` | 域内 DoH |
-| 域外大类 | `geosite:geolocation-!cn` | 域外 DoH |
-| 显式域名 | `POLICY` 投影出的 `+.domain` | 按 `dnsZone` 覆盖大类兜底 |
-
-OpenAI、Claude / Anthropic 等高敏服务不依赖专项 GeoSite 集合；它们由 `CHAIN.ai` 里的显式域名表维护。遇到 GeoSite 大类覆盖不准但又不想改变路由时，添加到 `DNS_ONLY.domestic` 或 `DNS_ONLY.overseas`。
-
-| 配置项 | 来源字段 | 作用 |
-|---|---|---|
-| `nameserver-policy` | GeoSite 大类 + `dnsZone` | CN / 非 CN 解析兜底；显式域名按 `"overseas"` / `"domestic"` 覆盖 |
-| `fake-ip-filter` | `fakeIpBypass` | Apple 推送、NTP、STUN、游戏主机等对真实 IP 敏感的域名 |
-| `force-domain` | `sniffer: "force"` | chain 域名 + Cloudflare — 强制从 SNI 恢复域名，防止漏到 MATCH（详见下方 Sniffer 章节） |
-| `skip-domain` | `sniffer: "skip"` | Tailscale / Plex / Apple 推送等 — 保留 IP 语义，嗅探反而破坏 P2P 打洞 |
-| `fallback-filter` | `fallbackFilter` | 兜底：非 CN IP 走域外 DoH（`geoip-code: CN`） |
-
-### Sniffer — Fake-IP 模式的安全网
-
-Clash 在 `enhanced-mode: fake-ip` 下，客户端查 DNS 时直接返回一个假地址（`198.18.x.x`），不等真实解析完成。连接到达时，Clash 通常能从内部映射表反查出域名，用域名去匹配分流规则。
-
-但有些场景映射会丢失或根本不存在：
-
-- Fake-IP 缓存过期后，应用复用了旧连接里的 IP
-- QUIC (HTTP/3) 跳过 DNS，直接用上次缓存的 IP 发起 UDP 连接
-- 某些应用硬编码 IP，从不走 DNS
-
-这时 Clash 只看到一个对某 IP 的连接，没有域名 → 所有 `DOMAIN-SUFFIX` 规则都匹配不了 → 流量落到 `MATCH` 兜底 → **走错出口**。对于 AI 域名，这意味着流量可能绕过家宽出口规则，直接暴露当前 IP。
-
-**Sniffer 的作用：** 在转发之前，偷看（sniff）握手包的头几个字节，从 TLS ClientHello 的 SNI 字段 / HTTP 的 Host 头 / QUIC 握手中提取出真实域名，让规则重新命中。
-
-脚本通过 POLICY 的 `sniffer` 字段自动生成两个列表：
-
-| 列表 | POLICY 字段 | 包含谁 | 为什么 |
-|---|---|---|---|
-| `force-domain` | `sniffer: "force"` | 所有 chain 路由域名 + Cloudflare | 确保即使映射丢失，AI 流量也能从 SNI 恢复域名 → 命中家宽出口规则，不漏到 MATCH |
-| `skip-domain` | `sniffer: "skip"` | Tailscale / ZeroTier / Plex / Synology / Apple 推送 / 局域网 | 这些服务**故意**用 IP 语义工作（P2P 打洞、推送通道）；嗅探会把 IP 替换成域名，反而破坏连接 |
-
-### `respect-rules: true` — DNS 查询也走代理
-
-脚本启用了 `respect-rules: true`，让 DNS 查询本身也遵循分流规则，而不是全部从本地网络直连发出。
-
-**为什么需要：** `respect-rules: false`（Clash 默认值）时，所有 DoH 查询都从你本地网络直连发到 `dns.google`。出差到 CN 时意味着：
-- `dns.google` / `cloudflare-dns.com` 被墙 → 查询超时，浪费数秒
-- 如果部分可达，Google DNS 日志里会留下"CN IP 查了 claude.ai"这样的痕迹
-
-启用后，chain 域名的 DoH 查询经家宽出口面板出去；direct 域名走 `direct-nameserver`（域内 DoH）本地解析。无论你人在新加坡还是北京酒店，`dns.google` 看到的来源都会跟随当前家宽出口。
-
-**三阶防泄漏时序：**
-
-```
-1. 本地寻址    proxy-server-nameserver（域内 DoH）解析代理节点 IP → 建立代理隧道（不触发分流）
-               ↓
-2. 隧道内 DNS  DoH 查询（dns.google 等）经家宽出口完成加密解析
-               ↓
-3. 远端连接    AI 请求 Fake-IP 本地握手 → 实际域名在家宽出口解析 → AI 服务端只看到家宽 IP
-```
-
-> [!CAUTION]
-> 必须关闭浏览器的"安全 DNS / Secure DNS"功能。该功能绕过系统网络栈（跳过 Clash 的 Fake-IP），会导致真实 IP 泄漏。
-
-### 路由对照表
-
-| 出口 | SOURCE | DNS | 内容 |
-|---|---|---|---|
-| `az.严管调度.🤖 AI 高敏阵列` | `CHAIN.ai` | 域外 DoH | Anthropic / OpenAI / Google AI / Perplexity / Cursor / xAI / Meta AI<br>OpenRouter / Antigravity / Mistral / Hugging Face / Replicate / Groq<br>Together / ElevenLabs / Midjourney / Runway / Stability / Ideogram<br>Civitai / Character.ai / Pi / You / Phind / Kagi |
-| `az.严管调度.🛠️ 支撑平台` | `CHAIN.support` | 域外 DoH | Google / Microsoft / GitHub / GitLab / Atlassian<br>npm / PyPI / crates.io / Docker Hub / RubyGems<br>Vercel / Netlify / Supabase / Fly.io / Render / Railway<br>JetBrains / Stack Overflow / MDN / Read the Docs / GitBook<br>CDN：Cloudflare / AWS / CloudFront / Fastly / Akamai<br>Azure CDN / jsDelivr / Bunny / Cloudinary |
-| `az.严管调度.🛡️ 生态域集成` | `CHAIN.integrations` | 域外 DoH | 反机器人：Arkose / FunCaptcha / reCAPTCHA / hCaptcha<br>鉴权：Auth0 / Clerk / Okta<br>支付：Stripe / PayPal / Paddle / Lemon Squeezy<br>遥测：Statsig / Sentry / PostHog / Segment / Mixpanel / Amplitude / Datadog<br>基础设施：Cloudflare（含 Turnstile） |
-| `az.严管调度.🤖 AI 高敏阵列`（按进程名兜底） | `CHAIN.apps` | — | 位于显式域名和 CN 兜底之后。桌面 App：Claude / ChatGPT / Perplexity / Cursor / Quotio<br>AI 浏览器：Dia / Atlas / SunBrowser<br>CLI：`claude` / `gemini` / `codex` |
-| `az.其他调度.🎬 视频流媒体` | `MEDIA.video` | 域外 DoH | YouTube / Netflix / Disney+ / HBO Max / Hulu / Prime Video / Twitch<br>Peacock / Paramount+ / Crunchyroll / Vimeo / Dailymotion |
-| `az.其他调度.🎵 音乐播客` | `MEDIA.music` | 域外 DoH | Spotify / SoundCloud / Bandcamp |
-| `az.其他调度.🌐 社交长文` | `MEDIA.social` | 域外 DoH | X / Meta (Facebook / Instagram / Threads) / Reddit / TikTok<br>Snapchat / Pinterest / Bluesky / Tumblr<br>Medium / Substack / Patreon / Goodreads / Letterboxd |
-| `az.其他调度.💬 即时通讯` | `MEDIA.im` | 域外 DoH | Telegram / Discord / LINE / WhatsApp / Signal |
-| 默认代理 | `CDN.doh` | 域外 DoH | DoH：dns.google / cloudflare-dns.com / quad9.net<br>（经 `az.核心链路` 通用代理寻址） |
-| `DIRECT` | `CN` | 域内 DoH | 显式 CN 域名 + `GEOSITE,cn` / `GEOIP,CN` 兜底。AI：DeepSeek / Doubao / MiniMax / Baichuan / Stepfun / 通义 / Moonshot / 智谱 / SiliconFlow<br>办公：腾讯 / 钉钉 / 飞书 / WPS<br>云：阿里云 / 腾讯云 / 火山引擎 / 华为云 / 百度云 / 京东云 / 七牛 / 又拍 / 网宿 / 天翼 / 金山<br>消费：百度 / Bilibili / 微博 / 知乎 / 小红书 / 抖音 / 快手<br>网易 / 爱奇艺 / 优酷 / 芒果TV / 搜狐<br>淘宝 / 天猫 / 京东 / 拼多多 / 美团 / 大众点评 / 米哈游 |
-| `DIRECT` | `OVERSEAS.apple` | 域内 + 域外并行（fallback-filter 按 geoip 仲裁） | Apple / iCloud（不绑定单侧 DoH，确保 SG 与 CN 都能正常登录 Apple Store） |
-| `DIRECT` | `OVERSEAS.other` | 域外 DoH | 出口验证（ip.sb / ifconfig.me / ipinfo.io / ping0.cc）<br>沉浸式翻译 / MinerU（域内应用，因域内 DNS 解析异常而使用域外 DoH）<br>Tailscale / ZeroTier / Plex / Synology / Typeless |
-| `DIRECT` | `LOCAL` | 域内 DoH | Apple 推送 / `.lan` / `.local` / `.localhost` / `.home.arpa` |
-| — | `DNS_ONLY` | 按桶选择域内 / 域外 DoH | 只修正解析，不生成分流规则；用于 GeoSite 大类覆盖不准的个别站点 |
-| `DIRECT` | `NETWORK` | — | RFC 1918（10/8, 172.16/12, 192.168/16）<br>链路本地（169.254/16, fe80::/10）<br>CGNAT（100.64/10）/ Tailscale magic IP<br>IPv6 ULA（fc00::/7） |
-
-修改路由归类只需改 `POLICY` 对应源桶，`nameserver-policy` / 分流规则 / Sniffer / `fallback-filter` 自动同步。只修正解析、不改变出口时，改 `DNS_ONLY`。
-
-规则顺序固定为：高敏域名 → 媒体域名 → DoH 端点 → 显式 DIRECT → CN 兜底 → AI 进程兜底 → 订阅非 `MATCH` → `MATCH`。域外普通网站不做统一美国化，继续交给显式规则或订阅兜底。
-
-### 校验
-
-| 函数 | 时机 | 说明 |
-|---|---|---|
-| `assertExpectedRoutesCoverage` | 加载期 | 样本域名必须在域名模式中有覆盖 |
-| `validateManagedRouting` | 运行期 | 规则、组和官方中转节点正确 |
-| `tests/test.js` | 测试 | `vm` 隔离运行 12 个纯函数 + 19 个端到端用例 |
-
-### 函数命名约定
-
-| 前缀 | 含义 |
-|---|---|
-| `build*` | 纯函数，只返回值 |
-| `resolve*` | 读 + 幂等写 |
-| `write*` | 改 config |
-| `assert*` | 断言，失败抛错 |
+测试通过 `vm` 加载单文件覆写脚本，覆盖 12 个纯函数单元测试和 19 个端到端集成测试。
 
 ## Compatibility
 
-- **运行环境：** Clash Verge 的 JavaScriptCore
-- **语法：** ES5（无箭头函数、解构、模板字符串、展开语法）
-- **进程分流：** 当前只维护 macOS 进程名，其他平台需自行扩展
+- 运行环境：Clash Verge 的 JavaScriptCore。
+- 语法：ES5。
+- 进程分流：当前维护 macOS 进程名，其他平台可自行扩展。
 
 ## License
 
-MIT — 见 [LICENSE](LICENSE)。   
+MIT — 见 [LICENSE](LICENSE)。

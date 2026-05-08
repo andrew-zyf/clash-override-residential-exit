@@ -6,7 +6,7 @@
 //
 // 单文件说明：由旧 config + override 两个入口合并而来。
 //
-// @version 11.9
+// @version 12.0
 
 // ===========================================================================
 // 用户配置
@@ -15,7 +15,7 @@
 var USER_OPTIONS = {
   // overrideMode: "dns-sniffer-only", // dns-sniffer-only = 只写 DNS/Sniffer
   overrideMode: "merged", // merged = DNS/Sniffer + 家宽/媒体分流
-  routeBrowserToChain: true // 是否让 AI 浏览器按应用名继续强制走家宽出口
+  routeBrowserToResidentialExit: true // 是否让 AI 浏览器按应用名继续强制走家宽出口
 };
 
 var MIYA_CREDENTIALS = {
@@ -155,8 +155,8 @@ var FAKE_IP_BYPASS = {
   ]
 };
 
-// ---------- Chain · 家宽出口 ----------
-var CHAIN = {
+// ---------- Residential Exit · 家宽出口 ----------
+var RESIDENTIAL_EXIT = {
   support: {
     google_core: [
       "+.google.com",
@@ -480,9 +480,9 @@ var CDN = {
   }
 };
 
-// ---------- Media（独立地区组，不走家宽链路） ----------
+// ---------- Media（独立地区组，不走家宽出口） ----------
 // 分四类：视频流媒体 / 音乐流媒体 / 社交 / 即时通讯。
-// 这一桶里的所有域名都路由到 `mediaRegion`（默认 US），与家宽 chain 解耦，
+// 这一桶里的所有域名都路由到媒体分区面板，与家宽出口解耦，
 // 也借此跨越对这些站点不友好的网络环境（GFW、地区封锁等）。
 var MEDIA = {
   // 按 UI 面板分为 video, music, social, im 四个路由分桶
@@ -968,7 +968,7 @@ var NETWORK = {
 //   processNames  受管桌面 App 进程名
 //   cliNames      AI CLI 可执行名（固定走家宽出口面板）
 var EXPECTED_ROUTES = {
-  toChain: {
+  toResidential: {
     domains: [
       "claude.ai",
       "chatgpt.com",
@@ -1077,31 +1077,31 @@ function flattenGroupedPatterns(groupedPatterns) {
 // 字段：
 //   key            标识（调试用）
 //   patterns       `+.domain` 模式数组
-//   route          "chain.*" | "media.*" | "direct" | "proxy"，省略 = 不生成规则
+//   route          "residential.*" | "media.*" | "direct" | "proxy"，省略 = 不生成规则
 //   dnsZone        "overseas" | "domestic"，省略 = 不进 nameserver-policy
 //   sniffer        "force" | "skip"，省略 = 不参与 sniffer
 //   fakeIpBypass   true = 进入 fake-ip-filter
 //   fallbackFilter true = 进入 fallback-filter.domain
 //
-// 冲突解决：direct 优先于 chain/media（派生时 excludeStrings）。
+// 冲突解决：direct 优先于 residential/media（派生时 excludeStrings）。
 function buildPolicy() {
   return [
-    // ---- chain · 走家宽出口 ----
+    // ---- residential · 走家宽出口 ----
     {
-      key: "chain.support", patterns: flattenGroupedPatterns(CHAIN.support),
-      route: "chain.support", dnsZone: "overseas", sniffer: "force", fallbackFilter: true
+      key: "residential.support", patterns: flattenGroupedPatterns(RESIDENTIAL_EXIT.support),
+      route: "residential.support", dnsZone: "overseas", sniffer: "force", fallbackFilter: true
     },
     {
-      key: "chain.ai", patterns: flattenGroupedPatterns(CHAIN.ai),
-      route: "chain.ai", dnsZone: "overseas", sniffer: "force", fallbackFilter: true
+      key: "residential.ai", patterns: flattenGroupedPatterns(RESIDENTIAL_EXIT.ai),
+      route: "residential.ai", dnsZone: "overseas", sniffer: "force", fallbackFilter: true
     },
     {
-      key: "chain.integrations", patterns: flattenGroupedPatterns(CHAIN.integrations),
-      route: "chain.integrations", dnsZone: "overseas", sniffer: "force", fallbackFilter: true
+      key: "residential.integrations", patterns: flattenGroupedPatterns(RESIDENTIAL_EXIT.integrations),
+      route: "residential.integrations", dnsZone: "overseas", sniffer: "force", fallbackFilter: true
     },
     {
-      key: "chain.cloudflare", patterns: flattenGroupedPatterns(CHAIN.force),
-      route: "chain.cloudflare", dnsZone: "overseas", sniffer: "force", fallbackFilter: true
+      key: "residential.cloudflare", patterns: flattenGroupedPatterns(RESIDENTIAL_EXIT.force),
+      route: "residential.cloudflare", dnsZone: "overseas", sniffer: "force", fallbackFilter: true
     },
 
     // ---- media · 走媒体独立选区 ----
@@ -1127,10 +1127,10 @@ function buildPolicy() {
       key: "default.doh", patterns: flattenGroupedPatterns(CDN.doh),
       route: "proxy", dnsZone: "overseas", fallbackFilter: true
     },
-    // ---- chain · CDN 基础设施走家宽出口 ----
+    // ---- residential · CDN 基础设施走家宽出口 ----
     {
-      key: "chain.cdn", patterns: flattenGroupedPatterns(CDN.cloud),
-      route: "chain.cdn", dnsZone: "overseas", sniffer: "force", fallbackFilter: true
+      key: "residential.cdn", patterns: flattenGroupedPatterns(CDN.cloud),
+      route: "residential.cdn", dnsZone: "overseas", sniffer: "force", fallbackFilter: true
     },
     {
       key: "dnsOnly.domestic", patterns: flattenGroupedPatterns(DNS_ONLY.domestic),
@@ -1218,7 +1218,7 @@ function projectRoutedPatterns(route, directPatterns) {
 }
 
 // 从 POLICY 投影出下游真正消费的三类域名集合：
-//   chain    → 进家宽出口（排除被 direct 抢占的模式）
+//   residential → 进家宽出口（排除被 direct 抢占的模式）
 //   media    → 媒体地区组
 //   direct   → 全量 DIRECT 模式，用于生成直连规则与 fake-ip/sniffer 判断
 //   proxy    → 进通用代理组（用于强制 DoH 服务器等前跳代理寻址）
@@ -1228,12 +1228,12 @@ function buildDerivedPatterns() {
   var direct = projectPolicyPatterns(matchRoute("direct"));
   var proxy = projectRoutedPatterns("proxy", direct);
 
-  var chainAi = projectRoutedPatterns("chain.ai", direct);
-  var chainSupport = projectRoutedPatterns("chain.support", direct);
-  var chainIntegrations = projectRoutedPatterns("chain.integrations", direct);
-  var chainCloudflare = projectRoutedPatterns("chain.cloudflare", direct);
-  var chainCdn = projectRoutedPatterns("chain.cdn", direct);
-  var chainAll = mergeStringGroups([chainAi, chainSupport, chainIntegrations, chainCloudflare, chainCdn]);
+  var residentialAi = projectRoutedPatterns("residential.ai", direct);
+  var residentialSupport = projectRoutedPatterns("residential.support", direct);
+  var residentialIntegrations = projectRoutedPatterns("residential.integrations", direct);
+  var residentialCloudflare = projectRoutedPatterns("residential.cloudflare", direct);
+  var residentialCdn = projectRoutedPatterns("residential.cdn", direct);
+  var residentialAll = mergeStringGroups([residentialAi, residentialSupport, residentialIntegrations, residentialCloudflare, residentialCdn]);
 
   var mediaVideo = projectRoutedPatterns("media.video", direct);
   var mediaMusic = projectRoutedPatterns("media.music", direct);
@@ -1243,11 +1243,11 @@ function buildDerivedPatterns() {
 
   return {
     proxy: proxy,
-    chain: {
-      ai: chainAi,
-      support: mergeStringGroups([chainSupport, chainCdn]),
-      integrations: mergeStringGroups([chainIntegrations, chainCloudflare]),
-      all: chainAll
+    residential: {
+      ai: residentialAi,
+      support: mergeStringGroups([residentialSupport, residentialCdn]),
+      integrations: mergeStringGroups([residentialIntegrations, residentialCloudflare]),
+      all: residentialAll
     },
     media: {
       video: mediaVideo,
@@ -1260,30 +1260,30 @@ function buildDerivedPatterns() {
     fakeIpBypass: projectPolicyPatterns(matchFakeIpBypass),
     // Sniffer 是 fake-ip 模式的安全网：当 fake-IP 映射丢失或 QUIC 跳过 DNS 时，
     // 从 TLS SNI / HTTP Host 恢复域名，确保 AI 流量命中家宽出口规则而非漏到 MATCH。
-    //   force → chain 域名 + 所有 sniffer:"force" 条目（Cloudflare 等）
+    //   force → 家宽出口域名 + 所有 sniffer:"force" 条目（Cloudflare 等）
     //   skip  → Tailscale / Plex / Apple 推送等故意用 IP 语义的直连应用
     sniffer: {
-      force: mergeStringGroups([chainAll, projectPolicyPatterns(matchSniffer("force"))]),
+      force: mergeStringGroups([residentialAll, projectPolicyPatterns(matchSniffer("force"))]),
       skip: projectPolicyPatterns(matchSniffer("skip"))
     }
   };
 }
 
-// 从 CHAIN.apps 展开出三类进程入口：
+// 从 RESIDENTIAL_EXIT.apps 展开出三类进程入口：
 //   aiApps  → 受管 AI 桌面 App + 显式 helper（始终走家宽出口面板）
 //   aiCli   → AI 命令行（始终走家宽出口面板）
 //   browser → AI 浏览器 + 全部 helper（是否启用由 USER_OPTIONS 决定）
 function buildDerivedProcessNames() {
   return {
     aiApps: expandProcessNamesWithHelpers(
-      CHAIN.apps.ai.apps,
-      CHAIN.apps.ai.helperSuffixes,
-      CHAIN.apps.ai.exact
+      RESIDENTIAL_EXIT.apps.ai.apps,
+      RESIDENTIAL_EXIT.apps.ai.helperSuffixes,
+      RESIDENTIAL_EXIT.apps.ai.exact
     ),
-    aiCli: uniqueStrings(CHAIN.apps.ai.cli.slice()),
+    aiCli: uniqueStrings(RESIDENTIAL_EXIT.apps.ai.cli.slice()),
     browser: expandProcessNamesWithHelpers(
-      CHAIN.apps.browser.apps,
-      CHAIN.apps.browser.helperSuffixes
+      RESIDENTIAL_EXIT.apps.browser.apps,
+      RESIDENTIAL_EXIT.apps.browser.helperSuffixes
     )
   };
 }
@@ -1312,10 +1312,10 @@ function assertExpectedRoutesCoverage() {
   var i;
   var sample;
 
-  for (i = 0; i < EXPECTED_ROUTES.toChain.domains.length; i++) {
-    sample = EXPECTED_ROUTES.toChain.domains[i];
-    if (!isDomainCoveredBySuffixPatterns(sample, DERIVED.patterns.chain.all)) {
-      throw createUserError("toChain 样本未被 chain 源覆盖: " + sample);
+  for (i = 0; i < EXPECTED_ROUTES.toResidential.domains.length; i++) {
+    sample = EXPECTED_ROUTES.toResidential.domains[i];
+    if (!isDomainCoveredBySuffixPatterns(sample, DERIVED.patterns.residential.all)) {
+      throw createUserError("toResidential 样本未被 residential 源覆盖: " + sample);
     }
   }
 
@@ -1329,11 +1329,11 @@ function assertExpectedRoutesCoverage() {
   var procLookup = buildStringLookup(
     DERIVED.processNames.aiApps.concat(DERIVED.processNames.aiCli)
   );
-  var procSamples = EXPECTED_ROUTES.toChain.processNames
-    .concat(EXPECTED_ROUTES.toChain.cliNames);
+  var procSamples = EXPECTED_ROUTES.toResidential.processNames
+    .concat(EXPECTED_ROUTES.toResidential.cliNames);
   for (i = 0; i < procSamples.length; i++) {
     if (!procLookup[procSamples[i]]) {
-      throw createUserError("toChain 样本进程未在 CHAIN.apps 中: " + procSamples[i]);
+      throw createUserError("toResidential 样本进程未在 RESIDENTIAL_EXIT.apps 中: " + procSamples[i]);
     }
   }
 }
@@ -1395,7 +1395,7 @@ function buildDnsFallbackFilter() {
 //
 // respect-rules: true — 让 DNS 查询也走分流规则，而不是全部从本地直连发出。
 // 效果：
-//   chain 域名的 DoH 查询 → 经家宽出口面板出去 → dns.google 看到的是所选出口 IP
+//   家宽出口域名的 DoH 查询 → 经家宽出口面板出去 → dns.google 看到的是所选出口 IP
 //   direct 域名的 DoH 查询 → 走 direct-nameserver（域内 DoH）→ 本地直连
 //   media 域名的 DoH 查询 → 经媒体代理组出去
 // 为什么需要：
@@ -1488,14 +1488,6 @@ var BASE = {
   nodeNames: {
     transit: "MiyaIP（官方中转）"
   },
-  legacyNodeNames: {
-    relay: "自选节点 => 家宽IP",
-    relayOld: "自选节点 + 家宽IP"
-  },
-  legacyGroupNames: {
-    chainGroup: "az.核心链路.🔗 链式代理-家宽出口",
-    chainGroupTypedD: "az.核心链路.d链式代理-家宽出口"
-  },
   groupNames: {
     nodeSelection: "办公娱乐好帮手" // 适配用户当前订阅里托管的全局选择组
   },
@@ -1513,18 +1505,18 @@ var BASE = {
   groupNamePrefixes: {
     base: "az.分区测速."
   },
-  chainGroupName: "az.核心链路.🔗 家宽出口",
+  residentialGroupName: "az.核心出口.🏠 家宽出口",
   // Clash 支持的合法代理类型；buildMiyaProxy 会校验硬编码类型在此白名单内。
   validProxyTypes: ["http", "https", "socks5", "ss", "ssr", "vmess", "trojan", "vless", "hysteria", "tuic", "snell", "wireguard"]
 };
 
 // 是否让受管 AI 浏览器继续按应用名强制走家宽出口。
-function shouldRouteBrowserToChain() {
-  return ACTIVE_USER_OPTIONS.routeBrowserToChain !== false;
+function shouldRouteBrowserToResidentialExit() {
+  return ACTIVE_USER_OPTIONS.routeBrowserToResidentialExit !== false;
 }
 
 // ===========================================================================
-// 5. 代理链路与选区
+// 5. 代理出口与选区
 // ===========================================================================
 
 // 确保主配置里存在代理、代理组和规则三个容器。
@@ -1601,20 +1593,6 @@ function removeNamedItem(items, targetName) {
   if (itemIndex >= 0) items.splice(itemIndex, 1);
 }
 
-// 从指定代理组中删除旧受管成员，避免升级后旧核心组或旧 relay 残留在选择面板。
-function removeProxyNamesFromGroup(config, groupName, removedProxyNames) {
-  var group = findProxyGroupByName(config["proxy-groups"], groupName);
-  if (!group || !group.proxies) return;
-
-  var removedLookup = buildStringLookup(removedProxyNames);
-  var nextProxyNames = [];
-  for (var i = 0; i < group.proxies.length; i++) {
-    if (removedLookup[group.proxies[i]]) continue;
-    nextProxyNames.push(group.proxies[i]);
-  }
-  group.proxies = nextProxyNames;
-}
-
 // 按名称查找单个代理节点。
 function findProxyByName(proxies, proxyName) {
   return findNamedItem(proxies, proxyName);
@@ -1670,27 +1648,12 @@ function writeManagedGroupIntoNodeSelection(config, managedGroupName) {
   nodeSelectionGroup.proxies = uniqueStrings(nextProxyNames);
 }
 
-// 注入 MiyaIP 官方中转节点，并清理旧链式家宽出口节点。
+// 注入 MiyaIP 官方中转节点。
 function writeMiyaProxies(config, miyaCredentials) {
-  removeNamedItem(config.proxies, BASE.legacyNodeNames.relay);
-  removeNamedItem(config.proxies, BASE.legacyNodeNames.relayOld);
   upsertNamedItem(
     config.proxies,
     buildMiyaProxy(miyaCredentials, BASE.nodeNames.transit, miyaCredentials.transit)
   );
-}
-
-// 清理已废弃的链式 relay 代理组与选择组引用。
-function cleanupLegacyChainObjects(config) {
-  var legacyNames = [
-    BASE.legacyGroupNames.chainGroup,
-    BASE.legacyGroupNames.chainGroupTypedD,
-    BASE.legacyNodeNames.relay,
-    BASE.legacyNodeNames.relayOld
-  ];
-  removeNamedItem(config["proxy-groups"], BASE.legacyGroupNames.chainGroup);
-  removeNamedItem(config["proxy-groups"], BASE.legacyGroupNames.chainGroupTypedD);
-  removeProxyNamesFromGroup(config, BASE.groupNames.nodeSelection, legacyNames);
 }
 
 // 仅根据订阅节点创建或修正指定地区的 `url-test` 代理组。
@@ -1711,18 +1674,16 @@ function writeRegionGroup(config, region, groupNameSuffix) {
 }
 
 // 创建家宽出口 select 组（仅保留 MiyaIP 官方中转）。
-function writeChainGroup(config) {
-  var chainGroupName = BASE.chainGroupName;
-
-  cleanupLegacyChainObjects(config);
+function writeResidentialGroup(config) {
+  var residentialGroupName = BASE.residentialGroupName;
 
   upsertNamedItem(config["proxy-groups"], {
-    name: chainGroupName,
+    name: residentialGroupName,
     type: "select",
     proxies: [BASE.nodeNames.transit]
   });
 
-  return chainGroupName;
+  return residentialGroupName;
 }
 
 // UI 面板代理组名常量。
@@ -1764,7 +1725,7 @@ function writeExpandedProxyGroups(config, strictAiTarget, regionalTargets) {
 
 // 解析路由目标：创建家宽出口组、地区测速组、UI 面板组。
 function resolveRoutingTargets(config) {
-  var chainGroupName = writeChainGroup(config);
+  var residentialGroupName = writeResidentialGroup(config);
 
   var regionalTargets = {};
   // 为所有已定义地区生成标准 url-test 组
@@ -1779,11 +1740,11 @@ function resolveRoutingTargets(config) {
   }
 
   // 注入 UI 面板分组
-  writeExpandedProxyGroups(config, chainGroupName, regionalTargets);
+  writeExpandedProxyGroups(config, residentialGroupName, regionalTargets);
 
   return {
-    chainGroupName: chainGroupName,
-    strictAiTarget: chainGroupName
+    residentialGroupName: residentialGroupName,
+    strictAiTarget: residentialGroupName
   };
 }
 
@@ -1824,15 +1785,15 @@ function dedupeRulesByIdentity(ruleLines) {
   return deduped;
 }
 
-// 拼接所有管理规则。顺序即优先级：显式域名优先，进程规则作为最后的链式兜底。
+// 拼接所有管理规则。顺序即优先级：显式域名优先，进程规则作为最后的应用兜底。
 function buildManagedRules(derived) {
-  var concatenated = buildStrictChainDomainRules(derived)
+  var concatenated = buildResidentialDomainRules(derived)
     .concat(buildMediaRules(derived))
     .concat(buildProxyRules(derived))
     .concat(buildDirectRules(derived))
     .concat(buildChinaFallbackRules())
     .concat(buildStrictProcessRules(derived))
-    .concat(buildBrowserChainRules(derived));
+    .concat(buildBrowserResidentialRules(derived));
   return dedupeRulesByIdentity(concatenated);
 }
 
@@ -1918,17 +1879,17 @@ function buildStrictProcessGroups(derived) {
 }
 
 // 按当前用户选项返回应纳入家宽出口面板的浏览器进程分组。
-function buildBrowserChainProcessGroups(derived) {
-  if (!shouldRouteBrowserToChain()) return [];
+function buildBrowserResidentialProcessGroups(derived) {
+  if (!shouldRouteBrowserToResidentialExit()) return [];
   return [derived.processNames.browser];
 }
 
-// 生成 chain 域名规则：AI / 支撑平台 / 集成服务显式锁定到家宽出口面板。
-function buildStrictChainDomainRules(derived) {
+// 生成家宽出口域名规则：AI / 支撑平台 / 集成服务显式锁定到家宽出口面板。
+function buildResidentialDomainRules(derived) {
   var ruleLines = [];
-  appendSuffixRules(ruleLines, derived.patterns.chain.ai, UI_GROUPS.ai);
-  appendSuffixRules(ruleLines, derived.patterns.chain.support, UI_GROUPS.support);
-  appendSuffixRules(ruleLines, derived.patterns.chain.integrations, UI_GROUPS.integrations);
+  appendSuffixRules(ruleLines, derived.patterns.residential.ai, UI_GROUPS.ai);
+  appendSuffixRules(ruleLines, derived.patterns.residential.support, UI_GROUPS.support);
+  appendSuffixRules(ruleLines, derived.patterns.residential.integrations, UI_GROUPS.integrations);
   return ruleLines;
 }
 
@@ -1947,9 +1908,9 @@ function buildProxyRules(derived) {
 }
 
 // 生成浏览器进程规则，承载按应用名强制分流的 AI 浏览器进程。
-function buildBrowserChainRules(derived) {
+function buildBrowserResidentialRules(derived) {
   var ruleLines = [];
-  appendProcessRuleGroups(ruleLines, buildBrowserChainProcessGroups(derived), UI_GROUPS.ai); // 统一丢向 AI 可视化面板
+  appendProcessRuleGroups(ruleLines, buildBrowserResidentialProcessGroups(derived), UI_GROUPS.ai); // 统一丢向 AI 可视化面板
   return ruleLines;
 }
 
@@ -2005,7 +1966,7 @@ function haveSameStringSet(values, expectedValues) {
 
 // 断言路由目标一致性：strictAi = 家宽出口组。
 function assertRoutingTargetCoherence(routingTargets) {
-  if (routingTargets.strictAiTarget !== routingTargets.chainGroupName) {
+  if (routingTargets.strictAiTarget !== routingTargets.residentialGroupName) {
     throw createUserError(
       "域外 AI 与支撑平台未直接指向当前家宽出口组，请检查代理组注入逻辑"
     );
@@ -2014,7 +1975,7 @@ function assertRoutingTargetCoherence(routingTargets) {
 
 // 断言家宽出口组在节点/代理组中存在。
 function assertRoutingTargetsExist(config, routingTargets) {
-  if (!hasProxyOrGroup(config, routingTargets.chainGroupName)) {
+  if (!hasProxyOrGroup(config, routingTargets.residentialGroupName)) {
     throw createUserError(
       "当前家宽出口组不存在，请检查代理组注入逻辑"
     );
@@ -2024,7 +1985,7 @@ function assertRoutingTargetsExist(config, routingTargets) {
 // 断言官方中转节点状态。
 function assertTransitBindings(config) {
   var transitProxy = findProxyByName(config.proxies, BASE.nodeNames.transit);
-  if (!transitProxy || transitProxy["dialer-proxy"]) {
+  if (!transitProxy) {
     throw createUserError(
       "官方中转节点状态异常，请检查 MIYA_CREDENTIALS 和节点注入逻辑"
     );
@@ -2032,13 +1993,13 @@ function assertTransitBindings(config) {
 }
 
 // 断言家宽出口组 shape 与成员集合。
-function assertChainGroupShape(config, chainGroupName) {
+function assertResidentialGroupShape(config, residentialGroupName) {
   var expectedMembers = [BASE.nodeNames.transit];
-  var chainGroup = findProxyGroupByName(config["proxy-groups"], chainGroupName);
+  var residentialGroup = findProxyGroupByName(config["proxy-groups"], residentialGroupName);
   if (
-    !chainGroup ||
-    chainGroup.type !== "select" ||
-    !haveSameStringSet(chainGroup.proxies || [], expectedMembers)
+    !residentialGroup ||
+    residentialGroup.type !== "select" ||
+    !haveSameStringSet(residentialGroup.proxies || [], expectedMembers)
   ) {
     throw createUserError(
       "当前家宽出口组内容异常，请检查代理组注入逻辑"
@@ -2063,13 +2024,13 @@ function validateManagedRouting(config, routingTargets, derived) {
   assertRoutingTargetCoherence(routingTargets);
   assertRoutingTargetsExist(config, routingTargets);
   assertTransitBindings(config);
-  assertChainGroupShape(config, routingTargets.chainGroupName);
+  assertResidentialGroupShape(config, routingTargets.residentialGroupName);
 
   var ruleLineLookup = buildStringLookup(config.rules);
   var validationTargets = buildRoutingValidationTargets(derived);
   // 断言规则落在正确的 UI 分组中
   assertRuleTargetBatchExpanded(ruleLineLookup, validationTargets.strict, [UI_GROUPS.ai, UI_GROUPS.support, UI_GROUPS.integrations]);
-  assertRuleTargetBatchExpanded(ruleLineLookup, shouldRouteBrowserToChain() ? validationTargets.browser : [], [UI_GROUPS.ai]);
+  assertRuleTargetBatchExpanded(ruleLineLookup, shouldRouteBrowserToResidentialExit() ? validationTargets.browser : [], [UI_GROUPS.ai]);
   assertRuleTargetBatchExpanded(ruleLineLookup, validationTargets.media, [UI_GROUPS.video, UI_GROUPS.music, UI_GROUPS.social, UI_GROUPS.im]);
 }
 
@@ -2079,7 +2040,7 @@ function validateManagedRouting(config, routingTargets, derived) {
 
 function buildRoutingValidationTargets(derived) {
   return {
-    strict: buildDomainValidationTargets(derived.patterns.chain.all)
+    strict: buildDomainValidationTargets(derived.patterns.residential.all)
       .concat(buildProcessValidationTargets(derived.processNames.aiApps))
       .concat(buildProcessValidationTargets(derived.processNames.aiCli)),
     media: buildDomainValidationTargets(derived.patterns.media.all),
@@ -2105,7 +2066,7 @@ function buildProcessValidationTargets(processNames) {
 }
 
 // 家宽出口入口。装配顺序：容器 → MiyaIP 节点 → 路由目标 → 规则 → 校验。
-function applyChainProxy(config, derived, miyaCredentials) {
+function applyResidentialExit(config, derived, miyaCredentials) {
   var routingTargets;
 
   writeContainers(config); // 初始化基础容器
@@ -2147,7 +2108,7 @@ function cloneMiyaCredentials(credentials) {
 function cloneUserOptions(options) {
   return {
     overrideMode: options.overrideMode,
-    routeBrowserToChain: options.routeBrowserToChain
+    routeBrowserToResidentialExit: options.routeBrowserToResidentialExit
   };
 }
 
@@ -2162,8 +2123,7 @@ function normalizeOverrideMode(mode) {
     normalizedMode === "merged" ||
     normalizedMode === "option-b" ||
     normalizedMode === "optionb" ||
-    normalizedMode === "full" ||
-    normalizedMode === "chain"
+    normalizedMode === "full"
   ) {
     return "merged";
   }
@@ -2218,5 +2178,5 @@ function main(config) {
     return config;
   }
 
-  return applyChainProxy(config, DNS_SNIFFER_MODULE.DERIVED, miyaCredentials);
+  return applyResidentialExit(config, DNS_SNIFFER_MODULE.DERIVED, miyaCredentials);
 }
