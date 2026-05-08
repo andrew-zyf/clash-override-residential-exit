@@ -56,8 +56,10 @@ function createBaseConfig() {
 // MIYA_CREDENTIALS / USER_OPTIONS on the sandbox object.
 function runMain(configMutator, sandboxMutator) {
   const sandbox = loadCombinedSandbox();
-  // Apply default test credentials
   sandbox.MIYA_CREDENTIALS = cloneJson(TEST_MIYA_CREDENTIALS);
+  // Pin the default chainRegion so tests are decoupled from the user preference
+  // baked into USER_OPTIONS. sandboxMutator can still override.
+  sandbox.USER_OPTIONS.chainRegion = "SG";
   if (typeof sandboxMutator === "function") sandboxMutator(sandbox);
 
   let config = createBaseConfig();
@@ -248,12 +250,23 @@ function testNormalizeOverrideMode() {
 
 // ---- script version marker ----
 function testVersionSingleDefinition() {
-  assert(combinedCode.includes("// @version 11.7"), "Expected @version 11.7");
+  assert(combinedCode.includes("// @version 11.8"), "Expected @version 11.8");
   const versionLines = combinedCode.split('\n').filter((l) =>
     l.includes("@version ") || l.includes("CHAIN_PROXY_STATE_VERSION")
   );
   assert.strictEqual(versionLines.length, 1, "Expected one script version marker");
   console.log("  PASS single version definition");
+}
+
+// ---- relay node display name ----
+function testRelayNodeDisplayName() {
+  assert.strictEqual(S.BASE.nodeNames.relay, "自选节点 => 家宽IP");
+
+  const { output } = runMain();
+  const relayProxy = findProxy(output, "自选节点 => 家宽IP");
+  assert(relayProxy, "renamed relay proxy missing");
+  assert.strictEqual(findProxy(output, "自选节点 + 家宽IP"), undefined);
+  console.log("  PASS relay node display name");
 }
 
 // ---- FAKE_IP_BYPASS structure ----
@@ -826,6 +839,81 @@ function testChainRegionAndBrowserOverride() {
   assertProcessRules(output, false, derivedBrowserProcessNames({ derived: sandbox.DNS_SNIFFER_MODULE.DERIVED }), sandbox.UI_GROUPS.ai);
 }
 
+// 订阅只含 HK 节点、chainRegion=SG 时应按 fallback 成功落到 HK，不抛错。
+// 归档 bugfix：v11.7 的 regionFallbackOrder.chain 遗漏 HK → 这类订阅下 main() 抛错
+// → Clash Verge 整体回退原 profile，用户感知是"脚本完全没生效"。
+function testChainRegionFallsBackToHK() {
+  const { sandbox, output } = runMain((config) => {
+    config.proxies = [{ name: "🇭🇰 HK Auto 01", type: "ss" }];
+    config["proxy-groups"] = [
+      { name: "办公娱乐好帮手", type: "select", proxies: ["🇭🇰 HK Auto 01"] }
+    ];
+    config.rules = ["MATCH,办公娱乐好帮手"];
+  });
+  const suffix = sandbox.BASE.groupNameSuffixes;
+  const hkRelay = regionGroupName(sandbox, "HK", suffix.base);
+  assert(findGroup(output, hkRelay), "HK fallback relay group missing");
+  assert.strictEqual(findProxy(output, sandbox.BASE.nodeNames.relay)["dialer-proxy"], hkRelay);
+}
+
+// 订阅使用英文全称（United States / Hong Kong / Singapore / Japan / Taiwan）时能被识别。
+function testRegionRegexAcceptsEnglishFullName() {
+  const { sandbox, output } = runMain((config) => {
+    config.proxies = [
+      { name: "United States 01", type: "ss" },
+      { name: "Hong Kong 02", type: "ss" },
+      { name: "Singapore premium", type: "ss" },
+      { name: "Japan Tokyo", type: "ss" },
+      { name: "Taiwan 03", type: "ss" }
+    ];
+    config["proxy-groups"] = [
+      { name: "办公娱乐好帮手", type: "select", proxies: ["United States 01"] }
+    ];
+    config.rules = ["MATCH,办公娱乐好帮手"];
+  });
+  const suffix = sandbox.BASE.groupNameSuffixes;
+  for (const code of ["US", "HK", "SG", "JP", "TW"]) {
+    assert(findGroup(output, regionGroupName(sandbox, code, suffix.base)),
+      "region group missing for " + code);
+  }
+}
+
+// 订阅命名用下划线或无分隔符跟数字（US_Tokyo / SG01）时能被识别。
+function testRegionRegexAcceptsUnderscoreAndNoSeparator() {
+  const { sandbox, output } = runMain((config) => {
+    config.proxies = [
+      { name: "US_Tokyo_01", type: "ss" },
+      { name: "SG01", type: "ss" }
+    ];
+    config["proxy-groups"] = [
+      { name: "办公娱乐好帮手", type: "select", proxies: ["US_Tokyo_01"] }
+    ];
+    config.rules = ["MATCH,办公娱乐好帮手"];
+  });
+  const suffix = sandbox.BASE.groupNameSuffixes;
+  assert(findGroup(output, regionGroupName(sandbox, "US", suffix.base)), "US group missing (underscore)");
+  assert(findGroup(output, regionGroupName(sandbox, "SG", suffix.base)), "SG group missing (no separator)");
+}
+
+// merged 模式凭证缺失时：抛错前不应写入 config.dns / config.sniffer。
+// 保证 main 要么完整成功要么完整无副作用，避免 Clash Verge 看到半写入配置。
+function testMergedModeDoesNotMutateDnsWhenCredentialsMissing() {
+  const sandbox = loadCombinedSandbox();
+  sandbox.MIYA_CREDENTIALS = {
+    username: "", password: "",
+    relay: { server: "", port: 8022 },
+    transit: { server: "", port: 8001 }
+  };
+  const config = createBaseConfig();
+  const beforeDns = config.dns;
+  const beforeSniffer = config.sniffer;
+
+  assert.throws(() => sandbox.main(config), /MIYA_CREDENTIALS/);
+
+  assert.strictEqual(config.dns, beforeDns, "config.dns should not be mutated on preflight failure");
+  assert.strictEqual(config.sniffer, beforeSniffer, "config.sniffer should not be mutated on preflight failure");
+}
+
 // ===========================================================================
 // Runner
 // ===========================================================================
@@ -837,6 +925,7 @@ const unitTests = [
   testCreateUserError,
   testNormalizeOverrideMode,
   testVersionSingleDefinition,
+  testRelayNodeDisplayName,
   testFakeIpBypassConstant,
   testDnsConfigContainsFakeIpBypass,
   testHasConfiguredMiyaCredentialsPort,
@@ -861,6 +950,10 @@ const integrationTests = [
   testNodeSelectionKeepsOnlyCurrentRelayGroup,
   testRepeatedRunDoesNotCreateSelfReference,
   testChainRegionAndBrowserOverride,
+  testChainRegionFallsBackToHK,
+  testRegionRegexAcceptsEnglishFullName,
+  testRegionRegexAcceptsUnderscoreAndNoSeparator,
+  testMergedModeDoesNotMutateDnsWhenCredentialsMissing,
 ];
 
 console.log("Unit tests (" + unitTests.length + "):");

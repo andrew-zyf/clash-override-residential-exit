@@ -6,7 +6,7 @@
 //
 // 单文件说明：由旧 config + override 两个入口合并而来。
 //
-// @version 11.7
+// @version 11.8
 
 // ===========================================================================
 // 用户配置
@@ -15,7 +15,7 @@
 var USER_OPTIONS = {
   // overrideMode: "dns-sniffer-only", // dns-sniffer-only = 只写 DNS/Sniffer
   overrideMode: "merged", // merged = DNS/Sniffer + 链式/媒体分流
-  chainRegion: "SG", // AI 家宽出口前一跳地区，可选 US / JP / HK / SG / TW
+  chainRegion: "HK", // AI 家宽出口前一跳地区，可选 US / JP / HK / SG / TW
   routeBrowserToChain: true // 是否让 AI 浏览器按应用名继续强制走 chainRegion
 };
 
@@ -1484,14 +1484,14 @@ return {
 // 所有运行期稳定常量的单一来源：地区、节点名、组名后缀、DoH 服务器、规则前缀。
 var BASE = {
   regions: {
-    US: { regex: /🇺🇸|美国|^US[|丨\- ]/i, label: "美国", flag: "🇺🇸" },
-    JP: { regex: /🇯🇵|日本|^JP[|丨\- ]/i, label: "日本", flag: "🇯🇵" },
-    HK: { regex: /🇭🇰|香港|^HK[|丨\- ]/i, label: "香港", flag: "🇭🇰" },
-    SG: { regex: /🇸🇬|新加坡|^SG[|丨\- ]/i, label: "新加坡", flag: "🇸🇬" },
-    TW: { regex: /🇹🇼|台湾|^TW[|丨\- ]/i, label: "台湾", flag: "🇹🇼" }
+    US: { regex: /🇺🇸|美国|United\s*States|^US(?:[|丨\-_ ]|\d)/i, label: "美国", flag: "🇺🇸" },
+    JP: { regex: /🇯🇵|日本|Japan|^JP(?:[|丨\-_ ]|\d)/i, label: "日本", flag: "🇯🇵" },
+    HK: { regex: /🇭🇰|香港|Hong\s*Kong|^HK(?:[|丨\-_ ]|\d)/i, label: "香港", flag: "🇭🇰" },
+    SG: { regex: /🇸🇬|新加坡|Singapore|^SG(?:[|丨\-_ ]|\d)/i, label: "新加坡", flag: "🇸🇬" },
+    TW: { regex: /🇹🇼|台湾|Taiwan|^TW(?:[|丨\-_ ]|\d)/i, label: "台湾", flag: "🇹🇼" }
   },
   nodeNames: {
-    relay: "自选节点 + 家宽IP",
+    relay: "自选节点 => 家宽IP",
     transit: "MiyaIP（官方中转）"
   },
   groupNames: {
@@ -1513,7 +1513,7 @@ var BASE = {
   },
   chainGroupName: "az.核心链路.🔗 链式代理-家宽出口",
   regionFallbackOrder: {
-    chain: ["SG", "TW", "JP", "US"] // 家宽出口优先低时延亚洲地区，最后再回退到美国
+    chain: ["SG", "HK", "TW", "JP", "US"] // 家宽出口优先低时延亚洲地区，最后再回退到美国
   },
   // Clash 支持的合法代理类型；buildMiyaProxy 会校验硬编码类型在此白名单内。
   validProxyTypes: ["http", "https", "socks5", "ss", "ssr", "vmess", "trojan", "vless", "hysteria", "tuic", "snell", "wireguard"]
@@ -1729,6 +1729,24 @@ function resolveRelayTarget(config, region) {
     BASE.regionFallbackOrder.chain,
     BASE.groupNameSuffixes.base,
     "chainRegion 节点"
+  );
+}
+
+// 只读扫描：`resolveRelayTarget` 的 dry-run 版本，用于 main() 前置校验。
+// 复用地区 fallback 顺序与节点识别，但不写入任何 proxy-group。
+// 抛错 → main 在写入 DNS/Sniffer 之前就返回，避免配置被部分修改。
+function dryRunResolveRelayTarget(config, region) {
+  var resolutionOrder = buildRegionResolutionOrder(region, BASE.regionFallbackOrder.chain);
+  var proxies = config.proxies || [];
+  for (var i = 0; i < resolutionOrder.length; i++) {
+    var meta = resolveRegionMeta(resolutionOrder[i], false);
+    if (!meta) continue;
+    if (collectRegionNodeNames(proxies, meta.regex).length > 0) return resolutionOrder[i];
+  }
+  throw createUserError(
+    "未找到可用的 chainRegion 节点，已按顺序尝试 " +
+    resolutionOrder.join(" / ") +
+    "，请检查订阅地区节点与命名"
   );
 }
 
@@ -2259,15 +2277,29 @@ function resolveConfiguredMiyaCredentials(credentials) {
   );
 }
 
+// merged 模式前置校验：在 DNS/Sniffer 写入之前完成所有可抛项。
+// 这样当校验失败时，用户看到明确错误，且 config 保持未被任何脚本改动的原样。
+// 设计动机：main 中途抛错会被 Clash Verge 视为脚本失败 → 整体回退到原 profile，
+// 用户感知是"脚本完全没生效"。前置校验避免写 DNS 后却因缺 relay 抛错的中间态。
+function preflightMergedMode(config) {
+  var credentials = resolveConfiguredMiyaCredentials(MIYA_CREDENTIALS);
+  dryRunResolveRelayTarget(config, ACTIVE_USER_OPTIONS.chainRegion);
+  return credentials;
+}
+
 function main(config) {
-  var miyaCredentials;
+  var miyaCredentials = null;
 
   ACTIVE_USER_OPTIONS = cloneUserOptions(USER_OPTIONS);
+
+  if (!shouldApplyOnlyDnsAndSniffer()) {
+    miyaCredentials = preflightMergedMode(config);
+  }
+
   DNS_SNIFFER_MODULE.apply(config);
   if (shouldApplyOnlyDnsAndSniffer()) {
     return config;
   }
 
-  miyaCredentials = resolveConfiguredMiyaCredentials(MIYA_CREDENTIALS);
   return applyChainProxy(config, DNS_SNIFFER_MODULE.DERIVED, miyaCredentials);
 }

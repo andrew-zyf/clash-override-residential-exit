@@ -4,6 +4,15 @@
 
 ---
 
+## v11.8 (2026-05-08)
+
+- **修复「脚本有时候不起作用」**：`main()` 在某些订阅下抛错 → Clash Verge 整体回退原 profile → 用户感知"脚本完全没生效"。定位到三个触发源并修复：
+  - `BASE.regionFallbackOrder.chain` 从 `["SG","TW","JP","US"]` 改为 `["SG","HK","TW","JP","US"]`，补齐遗漏的 HK。订阅只含 HK 节点时不再抛 `未找到可用的 chainRegion 节点`。
+  - `BASE.regions.*.regex` 扩展命名识别：追加英文全称（`United States` / `Hong Kong` / `Singapore` / `Japan` / `Taiwan`）、下划线分隔（`US_Tokyo`）、无分隔符跟数字（`SG01`）。保持 `^` 锚定与 `/i`，避免误伤。
+  - `main()` 重排：merged 模式下把 `MIYA_CREDENTIALS` 校验与 `chainRegion` 节点可达性检查前置到 `DNS_SNIFFER_MODULE.apply(config)` 之前。新增 `dryRunResolveRelayTarget`（只读扫描，不写 proxy-group）和 `preflightMergedMode`（集中前置校验）。失败时 `config.dns` / `config.sniffer` 不会被部分写入，行为要么完整成功要么完整无副作用。
+- **链式代理显示名澄清**：家宽出口节点从 `自选节点 + 家宽IP` 改名为 `自选节点 => 家宽IP`。该节点的测速 timeout 表示整条「自选节点 → 家宽 IP → 探测 URL」链路未通过，不是普通地区节点本身的测速。
+- 新增 4 个集成测试 + 1 个显示名单元测试（`tests/test.js`，总数 12 单元 + 20 集成）：HK fallback / 英文全称识别 / 下划线与无分隔符识别 / 前置校验不污染 DNS / 家宽出口显示名。
+
 ## v11.7 (2026-05-06)
 
 - **单文件合并**：`residential-chain-proxy-config.js` + `residential-chain-proxy-override.js` 合并为 `residential-chain-proxy-combined.js`，`MIYA_CREDENTIALS` / `USER_OPTIONS` 作为文件顶部变量直接嵌入。适配 Clash Verge 等只支持单覆写文件的客户端。
