@@ -1,4 +1,4 @@
-// 链式代理覆写 — 合并测试套件
+// 家宽出口覆写 — 合并测试套件
 //
 // 测试 residential-chain-proxy-combined.js 的纯函数与端到端行为。
 // 运行：node tests/test.js
@@ -14,7 +14,6 @@ const combinedCode = fs.readFileSync(combinedPath, "utf8");
 const TEST_MIYA_CREDENTIALS = {
   username: "user",
   password: "pass",
-  relay: { server: "1.2.3.4", port: 8000 },
   transit: { server: "transit.example.com", port: 8001 }
 };
 
@@ -57,9 +56,6 @@ function createBaseConfig() {
 function runMain(configMutator, sandboxMutator) {
   const sandbox = loadCombinedSandbox();
   sandbox.MIYA_CREDENTIALS = cloneJson(TEST_MIYA_CREDENTIALS);
-  // Pin the default chainRegion so tests are decoupled from the user preference
-  // baked into USER_OPTIONS. sandboxMutator can still override.
-  sandbox.USER_OPTIONS.chainRegion = "SG";
   if (typeof sandboxMutator === "function") sandboxMutator(sandbox);
 
   let config = createBaseConfig();
@@ -88,10 +84,32 @@ function regionGroupName(sandbox, regionKey, suffix) {
 function expectedGroupNames(sandbox) {
   const suffix = sandbox.BASE.groupNameSuffixes;
   return {
-    relay: regionGroupName(sandbox, "SG", suffix.base),
+    sgRegion: regionGroupName(sandbox, "SG", suffix.base),
     chainTarget: sandbox.BASE.chainGroupName,
     usRegion: regionGroupName(sandbox, "US", suffix.base)
   };
+}
+
+function expectedManualDispatchChoices(output, sandbox) {
+  const suffix = sandbox.BASE.groupNameSuffixes;
+  const choices = [sandbox.BASE.chainGroupName];
+  for (const code of ["US", "HK", "JP", "TW", "SG"]) {
+    const groupName = regionGroupName(sandbox, code, suffix.base);
+    if (findGroup(output, groupName)) choices.push(groupName);
+  }
+  return choices;
+}
+
+function uiGroupNames(sandbox) {
+  return [
+    sandbox.UI_GROUPS.ai,
+    sandbox.UI_GROUPS.support,
+    sandbox.UI_GROUPS.integrations,
+    sandbox.UI_GROUPS.video,
+    sandbox.UI_GROUPS.music,
+    sandbox.UI_GROUPS.social,
+    sandbox.UI_GROUPS.im
+  ];
 }
 
 function derivedBrowserProcessNames(state) {
@@ -250,7 +268,7 @@ function testNormalizeOverrideMode() {
 
 // ---- script version marker ----
 function testVersionSingleDefinition() {
-  assert(combinedCode.includes("// @version 11.8"), "Expected @version 11.8");
+  assert(combinedCode.includes("// @version 11.9"), "Expected @version 11.9");
   const versionLines = combinedCode.split('\n').filter((l) =>
     l.includes("@version ") || l.includes("CHAIN_PROXY_STATE_VERSION")
   );
@@ -258,15 +276,16 @@ function testVersionSingleDefinition() {
   console.log("  PASS single version definition");
 }
 
-// ---- relay node display name ----
-function testRelayNodeDisplayName() {
-  assert.strictEqual(S.BASE.nodeNames.relay, "自选节点 => 家宽IP");
+// ---- core group definition ----
+function testCoreGroupDefinition() {
+  assert.strictEqual(S.BASE.chainGroupName, "az.核心链路.🔗 家宽出口");
 
   const { output } = runMain();
-  const relayProxy = findProxy(output, "自选节点 => 家宽IP");
-  assert(relayProxy, "renamed relay proxy missing");
+  assert.strictEqual(findProxy(output, "自选节点 => 家宽IP"), undefined);
   assert.strictEqual(findProxy(output, "自选节点 + 家宽IP"), undefined);
-  console.log("  PASS relay node display name");
+  assert.strictEqual(findGroup(output, "az.核心链路.🔗 链式代理-家宽出口"), undefined);
+  assert.strictEqual(findGroup(output, "az.核心链路.d链式代理-家宽出口"), undefined);
+  console.log("  PASS core group definition");
 }
 
 // ---- FAKE_IP_BYPASS structure ----
@@ -291,7 +310,6 @@ function testDnsConfigContainsFakeIpBypass() {
   sandbox.USER_OPTIONS.overrideMode = "dns-sniffer-only";
   sandbox.MIYA_CREDENTIALS = {
     username: "", password: "",
-    relay: { server: "", port: 8022 },
     transit: { server: "", port: 8001 }
   };
   const baseCfg = { proxies: [], "proxy-groups": [], rules: [] };
@@ -312,47 +330,31 @@ function testHasConfiguredMiyaCredentialsPort() {
   const fn = S.hasConfiguredMiyaCredentials;
   assert.strictEqual(fn({
     username: "u", password: "p",
-    relay: { server: "1.2.3.4", port: 1 },
     transit: { server: "5.6.7.8", port: 65535 }
   }), true);
   assert.strictEqual(fn({
     username: "u", password: "p",
-    relay: { server: "1.2.3.4", port: 8080 },
     transit: { server: "5.6.7.8", port: 443 }
   }), true);
   assert.strictEqual(fn({
     username: "u", password: "p",
-    relay: { server: "1.2.3.4", port: 0 },
+    relay: { server: "", port: "bad" },
     transit: { server: "5.6.7.8", port: 443 }
-  }), false);
+  }), true);
   assert.strictEqual(fn({
     username: "u", password: "p",
-    relay: { server: "1.2.3.4", port: -1 },
-    transit: { server: "5.6.7.8", port: 443 }
-  }), false);
-  assert.strictEqual(fn({
-    username: "u", password: "p",
-    relay: { server: "1.2.3.4", port: 8080 },
     transit: { server: "5.6.7.8", port: 65536 }
   }), false);
   assert.strictEqual(fn({
     username: "u", password: "p",
-    relay: { server: "1.2.3.4", port: "8080" },
     transit: { server: "5.6.7.8", port: 443 }
-  }), false);
+  }), true);
   assert.strictEqual(fn({
     username: "u", password: "p",
-    relay: { server: "1.2.3.4", port: 8080 },
     transit: { server: "5.6.7.8", port: "abc" }
   }), false);
   assert.strictEqual(fn({
     username: "u", password: "p",
-    relay: { server: "1.2.3.4" },
-    transit: { server: "5.6.7.8", port: 443 }
-  }), false);
-  assert.strictEqual(fn({
-    username: "u", password: "p",
-    relay: { server: "1.2.3.4", port: 8080 },
     transit: { server: "5.6.7.8", port: null }
   }), false);
   console.log("  PASS hasConfiguredMiyaCredentials port validation");
@@ -408,12 +410,8 @@ function assertManagedProxyTopology(output, sandbox) {
   const names = expectedGroupNames(sandbox);
   const nodeNames = sandbox.BASE.nodeNames;
 
-  const relayProxy = findProxy(output, nodeNames.relay);
-  assert(relayProxy, "relay proxy missing");
-  assert.strictEqual(relayProxy.type, "http");
-  assert.strictEqual(relayProxy.server, TEST_MIYA_CREDENTIALS.relay.server);
-  assert.strictEqual(relayProxy.port, TEST_MIYA_CREDENTIALS.relay.port);
-  assert.strictEqual(relayProxy["dialer-proxy"], names.relay);
+  assert.strictEqual(findProxy(output, "自选节点 => 家宽IP"), undefined);
+  assert.strictEqual(findProxy(output, "自选节点 + 家宽IP"), undefined);
 
   const transitProxy = findProxy(output, nodeNames.transit);
   assert(transitProxy, "transit proxy missing");
@@ -421,20 +419,18 @@ function assertManagedProxyTopology(output, sandbox) {
   assert.strictEqual(transitProxy.server, TEST_MIYA_CREDENTIALS.transit.server);
   assert.strictEqual(transitProxy["dialer-proxy"], undefined);
 
-  const relayGroup = findGroup(output, names.relay);
-  assert(relayGroup, "relay group missing");
-  assert.strictEqual(relayGroup.type, "url-test");
-  assert.deepEqual(relayGroup.proxies, ["🇸🇬 SG Auto 01"]);
+  const sgGroup = findGroup(output, names.sgRegion);
+  assert(sgGroup, "SG region group missing");
+  assert.strictEqual(sgGroup.type, "url-test");
+  assert.deepEqual(sgGroup.proxies, ["🇸🇬 SG Auto 01"]);
 
   const chainGroup = findGroup(output, names.chainTarget);
   assert(chainGroup, "chain group missing");
   assert.strictEqual(chainGroup.type, "select");
-  assert(sameSet(chainGroup.proxies, [nodeNames.transit, nodeNames.relay]),
+  assert(sameSet(chainGroup.proxies, [nodeNames.transit]),
     "chain group members mismatch");
 
-  const uiGroupAi = findGroup(output, sandbox.UI_GROUPS.ai);
-  assert(uiGroupAi, "UI group AI missing");
-  assert.deepEqual(uiGroupAi.proxies, [names.chainTarget]);
+  assertManualDispatchGroups(output, sandbox);
 
   const usGroup = findGroup(output, names.usRegion);
   assert(usGroup, "US region group missing");
@@ -445,9 +441,25 @@ function assertManagedProxyTopology(output, sandbox) {
   assert(nodeSelection, "node selection group missing");
   assertIncludes(
     nodeSelection.proxies,
-    ["🇸🇬 SG Auto 01", names.relay, names.usRegion],
+    ["🇸🇬 SG Auto 01", names.sgRegion, names.usRegion],
     "node selection includes"
   );
+  assert(!nodeSelection.proxies.includes("az.核心链路.🔗 链式代理-家宽出口"),
+    "node selection should not keep old chain group");
+  assert(!nodeSelection.proxies.includes("自选节点 => 家宽IP"),
+    "node selection should not keep old relay node");
+}
+
+function assertManualDispatchGroups(output, sandbox) {
+  const expectedChoices = expectedManualDispatchChoices(output, sandbox);
+  for (const groupName of uiGroupNames(sandbox)) {
+    const group = findGroup(output, groupName);
+    assert(group, "UI group missing: " + groupName);
+    assert.strictEqual(group.type, "select");
+    assert.deepEqual(group.proxies, expectedChoices, "dispatch choices mismatch: " + groupName);
+    assert(!group.proxies.includes(sandbox.BASE.groupNames.nodeSelection),
+      "dispatch group must not include base node selection: " + groupName);
+  }
 }
 
 function assertCoreStrictRouting(output, sandbox) {
@@ -652,10 +664,21 @@ function testRequiresConfiguredMiyaCredentials() {
   assert.throws(() => runMain(null, (sb) => {
     sb.MIYA_CREDENTIALS = {
       username: "", password: "",
-      relay: { server: "", port: 8022 },
       transit: { server: "", port: 8001 }
     };
   }), /MiyaIP|MIYA_CREDENTIALS/);
+}
+
+function testMergedModeDoesNotRequireRegionNodes() {
+  const { sandbox, output } = runMain((config) => {
+    config.proxies = [];
+    config["proxy-groups"] = [
+      { name: "办公娱乐好帮手", type: "select", proxies: [] }
+    ];
+  });
+  const chainGroup = findGroup(output, sandbox.BASE.chainGroupName);
+  assert(chainGroup, "core group missing without region nodes");
+  assert.deepEqual(chainGroup.proxies, [sandbox.BASE.nodeNames.transit]);
 }
 
 function testUnifiedDnsSnifferOnlyMode() {
@@ -670,7 +693,6 @@ function testUnifiedDnsSnifferOnlyMode() {
       sb.USER_OPTIONS.overrideMode = "dns-sniffer-only";
       sb.MIYA_CREDENTIALS = {
         username: "", password: "",
-        relay: { server: "", port: 8022 },
         transit: { server: "", port: 8001 }
       };
     }
@@ -724,40 +746,18 @@ function testOnlyAiAndBrowserProcessesAreManaged() {
   ]);
 }
 
-function testMissingRegionFails() {
-  assert.throws(() => runMain(
-    null,
-    (sb) => {
-      sb.USER_OPTIONS.chainRegion = "JP";
-      sb.BASE.regionFallbackOrder.chain = [];
-    }
-  ), /未找到可用的 chainRegion 节点/);
-}
-
-function testChainRegionFallsBackToAvailableRegion() {
-  const { sandbox, output } = runMain(null, (sb) => {
-    sb.USER_OPTIONS.chainRegion = "JP";
-  });
-  const suffix = sandbox.BASE.groupNameSuffixes;
-  const fallbackRelay = regionGroupName(sandbox, "SG", suffix.base);
-  const fallbackChain = sandbox.BASE.chainGroupName;
-  assert(findGroup(output, fallbackRelay), "fallback relay group missing");
-  assert(findGroup(output, fallbackChain), "fallback chain group missing");
-  assert.strictEqual(findProxy(output, sandbox.BASE.nodeNames.relay)["dialer-proxy"], fallbackRelay);
-}
-
 function testMissingStrictTargetFails() {
   assert.throws(() => runMain(
     null,
     (sb) => {
       const original = sb.resolveRoutingTargets;
-      sb.resolveRoutingTargets = function(config, chainRegion) {
-        const rt = original(config, chainRegion);
+      sb.resolveRoutingTargets = function(config) {
+        const rt = original(config);
         rt.strictAiTarget = "错误目标";
         return rt;
       };
     }
-  ), /域外 AI 与支撑平台未直接指向当前 chainRegion 出口/);
+  ), /域外 AI 与支撑平台未直接指向当前家宽出口组/);
 }
 
 function testExistingManagedObjectsAreReconciled() {
@@ -767,12 +767,22 @@ function testExistingManagedObjectsAreReconciled() {
     const suffix = base.groupNameSuffixes;
 
     config.proxies.push({
-      name: nodeNames.relay, type: "http", server: "bad", port: 1,
+      name: "自选节点 => 家宽IP", type: "http", server: "bad", port: 1,
       username: "bad", password: "bad", udp: false, "dialer-proxy": "错误目标"
     });
     config.proxies.push({
       name: nodeNames.transit, type: "http", server: "bad", port: 2,
       username: "bad", password: "bad", udp: false, "dialer-proxy": "错误目标"
+    });
+    config["proxy-groups"][0].proxies = [
+      "🇸🇬 SG Auto 01",
+      "az.核心链路.🔗 链式代理-家宽出口",
+      "自选节点 => 家宽IP"
+    ];
+    config["proxy-groups"].push({
+      name: "az.核心链路.🔗 链式代理-家宽出口",
+      type: "select",
+      proxies: ["自选节点 => 家宽IP"]
     });
     config["proxy-groups"].push({ name: "SG" + suffix.base, type: "select", proxies: [base.chainGroupName] });
     config["proxy-groups"].push({ name: base.chainGroupName, type: "select", proxies: ["DIRECT"] });
@@ -781,13 +791,13 @@ function testExistingManagedObjectsAreReconciled() {
   assertManagedProxyTopology(output, sandbox);
 }
 
-function testChainGroupIsNotReusedAsRelayTarget() {
+function testCoreGroupReconcilesLegacyRelayMember() {
   const { sandbox, output } = runMain((config) => {
     const base = loadCombinedSandbox().BASE;
     const chainName = base.chainGroupName;
     config["proxy-groups"].push({
       name: chainName, type: "select",
-      proxies: [base.nodeNames.transit, base.nodeNames.relay]
+      proxies: [base.nodeNames.transit, "自选节点 => 家宽IP"]
     });
   });
   assertManagedProxyTopology(output, sandbox);
@@ -802,10 +812,9 @@ function testBadExternalRegionGroupIsNotReused() {
   assertManagedProxyTopology(output, sandbox);
 }
 
-function testNodeSelectionKeepsOnlyCurrentRelayGroup() {
+function testNodeSelectionKeepsManagedRegionGroups() {
   const { sandbox, output } = runMain((config) => {
-    const base = loadCombinedSandbox().BASE;
-    const staleRelay = "HK" + base.groupNameSuffixes.relaySuffix;
+    const staleRelay = "旧链式跳板组";
     config["proxy-groups"][0].proxies = ["🇸🇬 SG Auto 01", staleRelay];
   });
   assertManagedProxyTopology(output, sandbox);
@@ -818,15 +827,14 @@ function testRepeatedRunDoesNotCreateSelfReference() {
   const names = expectedGroupNames(sandbox);
 
   assertManagedProxyTopology(second, sandbox);
-  for (const name of [names.chainTarget, names.relay, names.usRegion]) {
+  for (const name of [names.chainTarget, names.sgRegion, names.usRegion]) {
     const count = second["proxy-groups"].filter((g) => g.name === name).length;
     assert.strictEqual(count, 1, "duplicate group after rerun: " + name);
   }
 }
 
-function testChainRegionAndBrowserOverride() {
+function testBrowserOverrideAndRegionGroups() {
   const { sandbox, dnsBase, output } = runMain(null, (sb) => {
-    sb.USER_OPTIONS.chainRegion = "US";
     sb.USER_OPTIONS.routeBrowserToChain = false;
   });
   const suffix = sandbox.BASE.groupNameSuffixes;
@@ -834,15 +842,13 @@ function testChainRegionAndBrowserOverride() {
 
   assert.strictEqual(output._miya, undefined);
   assert.strictEqual(output._azChainProxyUserConfig, undefined);
-  assert.strictEqual(findProxy(output, sandbox.BASE.nodeNames.relay)["dialer-proxy"], usRelay);
+  assert(findGroup(output, usRelay), "US region group missing");
   assertNameserverPolicyValues(output, [dnsBase.domesticGeosite], dnsBase.domestic);
   assertProcessRules(output, false, derivedBrowserProcessNames({ derived: sandbox.DNS_SNIFFER_MODULE.DERIVED }), sandbox.UI_GROUPS.ai);
 }
 
-// 订阅只含 HK 节点、chainRegion=SG 时应按 fallback 成功落到 HK，不抛错。
-// 归档 bugfix：v11.7 的 regionFallbackOrder.chain 遗漏 HK → 这类订阅下 main() 抛错
-// → Clash Verge 整体回退原 profile，用户感知是"脚本完全没生效"。
-function testChainRegionFallsBackToHK() {
+// 订阅只含 HK 节点时仍应生成 HK 分区测速组，不要求任何自动前跳。
+function testRegionGroupsCanBeGeneratedFromHKOnly() {
   const { sandbox, output } = runMain((config) => {
     config.proxies = [{ name: "🇭🇰 HK Auto 01", type: "ss" }];
     config["proxy-groups"] = [
@@ -851,9 +857,8 @@ function testChainRegionFallsBackToHK() {
     config.rules = ["MATCH,办公娱乐好帮手"];
   });
   const suffix = sandbox.BASE.groupNameSuffixes;
-  const hkRelay = regionGroupName(sandbox, "HK", suffix.base);
-  assert(findGroup(output, hkRelay), "HK fallback relay group missing");
-  assert.strictEqual(findProxy(output, sandbox.BASE.nodeNames.relay)["dialer-proxy"], hkRelay);
+  const hkRegion = regionGroupName(sandbox, "HK", suffix.base);
+  assert(findGroup(output, hkRegion), "HK region group missing");
 }
 
 // 订阅使用英文全称（United States / Hong Kong / Singapore / Japan / Taiwan）时能被识别。
@@ -901,7 +906,6 @@ function testMergedModeDoesNotMutateDnsWhenCredentialsMissing() {
   const sandbox = loadCombinedSandbox();
   sandbox.MIYA_CREDENTIALS = {
     username: "", password: "",
-    relay: { server: "", port: 8022 },
     transit: { server: "", port: 8001 }
   };
   const config = createBaseConfig();
@@ -925,7 +929,7 @@ const unitTests = [
   testCreateUserError,
   testNormalizeOverrideMode,
   testVersionSingleDefinition,
-  testRelayNodeDisplayName,
+  testCoreGroupDefinition,
   testFakeIpBypassConstant,
   testDnsConfigContainsFakeIpBypass,
   testHasConfiguredMiyaCredentialsPort,
@@ -936,21 +940,20 @@ const unitTests = [
 const integrationTests = [
   testDefaultConfig,
   testRequiresConfiguredMiyaCredentials,
+  testMergedModeDoesNotRequireRegionNodes,
   testUnifiedDnsSnifferOnlyMode,
   testDisableBrowserProcessProxy,
   testAiCliProcessProxyDefaultsOn,
   testAiCliProcessProxyAlwaysOn,
   testOnlyAiAndBrowserProcessesAreManaged,
-  testChainRegionFallsBackToAvailableRegion,
-  testMissingRegionFails,
   testMissingStrictTargetFails,
   testExistingManagedObjectsAreReconciled,
-  testChainGroupIsNotReusedAsRelayTarget,
+  testCoreGroupReconcilesLegacyRelayMember,
   testBadExternalRegionGroupIsNotReused,
-  testNodeSelectionKeepsOnlyCurrentRelayGroup,
+  testNodeSelectionKeepsManagedRegionGroups,
   testRepeatedRunDoesNotCreateSelfReference,
-  testChainRegionAndBrowserOverride,
-  testChainRegionFallsBackToHK,
+  testBrowserOverrideAndRegionGroups,
+  testRegionGroupsCanBeGeneratedFromHKOnly,
   testRegionRegexAcceptsEnglishFullName,
   testRegionRegexAcceptsUnderscoreAndNoSeparator,
   testMergedModeDoesNotMutateDnsWhenCredentialsMissing,
