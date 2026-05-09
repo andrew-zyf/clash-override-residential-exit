@@ -307,6 +307,12 @@ function testNoHardcodedSubscriptionDefaultProxy() {
   console.log("  PASS no hardcoded subscription default proxy");
 }
 
+// ---- default proxy matching should be restricted to core keywords ----
+function testDefaultProxyKeywordsAreRestricted() {
+  assert.deepEqual(S.BASE.defaultProxyGroupKeywords, ["PROXY", "节点选择", "手动选择", "GLOBAL"]);
+  console.log("  PASS default proxy keywords are restricted");
+}
+
 // ---- FAKE_IP_BYPASS structure ----
 function testFakeIpBypassConstant() {
   const bip = S.DNS_SNIFFER_MODULE.FAKE_IP_BYPASS;
@@ -681,6 +687,41 @@ function testCommonDefaultProxyNameIsUsed() {
   assertRulesMissing(output.rules, ["DOMAIN-SUFFIX,dns.google,PROXY"]);
 }
 
+function testDecoratedDefaultProxyNameIsUsed() {
+  const decoratedName = "🚀 节点选择 | 手动";
+  const { sandbox, output } = runMain((config) => {
+    config["proxy-groups"] = [
+      { name: decoratedName, type: "select", proxies: ["🇸🇬 SG Auto 01"] }
+    ];
+    config.rules = ["MATCH," + decoratedName];
+  });
+  const names = expectedGroupNames(sandbox);
+  const defaultProxyGroup = findGroup(output, decoratedName);
+
+  assert(defaultProxyGroup, "decorated default proxy group missing");
+  assert.strictEqual(sandbox.resolveDefaultProxyGroupName(output), decoratedName);
+  assertIncludes(defaultProxyGroup.proxies, [names.sgRegion, names.usRegion], "decorated default proxy includes");
+  assertRulesExist(output.rules, ["DOMAIN-SUFFIX,dns.google," + decoratedName]);
+}
+
+function testUnsupportedDefaultProxyNameFallsBack() {
+  const unsupportedName = "自动选择";
+  const { sandbox, output } = runMain((config) => {
+    config["proxy-groups"] = [
+      { name: unsupportedName, type: "select", proxies: ["🇸🇬 SG Auto 01"] }
+    ];
+    config.rules = ["MATCH," + unsupportedName];
+  });
+  const names = expectedGroupNames(sandbox);
+  const unsupportedGroup = findGroup(output, unsupportedName);
+
+  assert(unsupportedGroup, "unsupported proxy group missing");
+  assert.strictEqual(sandbox.resolveDefaultProxyGroupName(output), null);
+  assert(!unsupportedGroup.proxies.includes(names.sgRegion), "unsupported group must not receive region groups");
+  assertRulesExist(output.rules, ["DOMAIN-SUFFIX,dns.google," + sandbox.BASE.residentialGroupName]);
+  assertRulesMissing(output.rules, ["DOMAIN-SUFFIX,dns.google," + unsupportedName]);
+}
+
 function testRequiresConfiguredResidentialCredentials() {
   assert.throws(() => runMain(null, (sb) => {
     sb.RESIDENTIAL_CREDENTIALS = {
@@ -925,6 +966,7 @@ const unitTests = [
   testNoProviderBrandInScript,
   testNoSeparateBrowserRoutingOption,
   testNoHardcodedSubscriptionDefaultProxy,
+  testDefaultProxyKeywordsAreRestricted,
   testFakeIpBypassConstant,
   testDnsConfigContainsFakeIpBypass,
   testHasConfiguredResidentialCredentialsPort,
@@ -935,6 +977,8 @@ const unitTests = [
 const integrationTests = [
   testDefaultConfig,
   testCommonDefaultProxyNameIsUsed,
+  testDecoratedDefaultProxyNameIsUsed,
+  testUnsupportedDefaultProxyNameFallsBack,
   testRequiresConfiguredResidentialCredentials,
   testMergedModeDoesNotRequireRegionNodes,
   testUnifiedDnsSnifferOnlyMode,

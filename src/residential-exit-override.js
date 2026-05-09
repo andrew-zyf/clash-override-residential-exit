@@ -1487,19 +1487,11 @@ var BASE = {
   nodeNames: {
     transit: "家宽出口（官方中转）"
   },
-  defaultProxyGroupNames: [
+  defaultProxyGroupKeywords: [
     "PROXY",
-    "Proxy",
-    "proxy",
     "节点选择",
-    "🚀 节点选择",
-    "代理",
-    "代理节点",
     "手动选择",
-    "自动选择",
-    "国外流量",
-    "GLOBAL",
-    "Global"
+    "GLOBAL"
   ],
   ruleTargets: {
     direct: "DIRECT"
@@ -1608,12 +1600,20 @@ function findProxyGroupByName(proxyGroups, groupName) {
   return findNamedItem(proxyGroups, groupName);
 }
 
-// 从常见默认代理组名中选择订阅实际存在的第一个。
+// 判断代理组名是否包含默认代理核心词；允许订阅在核心词前后添加图标或说明。
+function defaultProxyGroupNameMatches(groupName, keyword) {
+  if (typeof groupName !== "string" || typeof keyword !== "string") return false;
+  return groupName.toUpperCase().indexOf(keyword.toUpperCase()) >= 0;
+}
+
+// 从常见默认代理核心词中选择订阅实际存在的第一个，返回订阅里的完整组名。
 function resolveDefaultProxyGroupName(config) {
   var proxyGroups = config["proxy-groups"] || [];
-  for (var i = 0; i < BASE.defaultProxyGroupNames.length; i++) {
-    if (findProxyGroupByName(proxyGroups, BASE.defaultProxyGroupNames[i])) {
-      return BASE.defaultProxyGroupNames[i];
+  for (var i = 0; i < BASE.defaultProxyGroupKeywords.length; i++) {
+    for (var j = 0; j < proxyGroups.length; j++) {
+      if (defaultProxyGroupNameMatches(proxyGroups[j].name, BASE.defaultProxyGroupKeywords[i])) {
+        return proxyGroups[j].name;
+      }
     }
   }
   return null;
