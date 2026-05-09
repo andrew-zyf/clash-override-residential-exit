@@ -1,5 +1,6 @@
 # 本地凭证文件
-src/MiyaIP 凭证.js
+src/residential-credentials.js
+src/家宽出口凭证.js
 
 # 本地草稿目录
 docs/
