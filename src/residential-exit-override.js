@@ -1487,9 +1487,20 @@ var BASE = {
   nodeNames: {
     transit: "家宽出口（官方中转）"
   },
-  groupNames: {
-    nodeSelection: "办公娱乐好帮手" // 适配用户当前订阅里托管的全局选择组
-  },
+  defaultProxyGroupNames: [
+    "PROXY",
+    "Proxy",
+    "proxy",
+    "节点选择",
+    "🚀 节点选择",
+    "代理",
+    "代理节点",
+    "手动选择",
+    "自动选择",
+    "国外流量",
+    "GLOBAL",
+    "Global"
+  ],
   ruleTargets: {
     direct: "DIRECT"
   },
@@ -1542,7 +1553,7 @@ function buildRegionGroupName(regionMeta, groupNameSuffix) {
   return BASE.groupNamePrefixes.base + regionMeta.flag + " " + regionMeta.label + groupNameSuffix;
 }
 
-// 根据凭证和端点信息生成一个 家宽出口 HTTP 代理节点。
+// 根据凭证和端点信息生成一个家宽出口 HTTP 代理节点。
 // 硬编码 type:"http" 在加载期校验：确保 "http" 在 BASE.validProxyTypes 白名单内。
 function buildResidentialProxy(residentialCredentials, proxyName, endpoint) {
   if (BASE.validProxyTypes.indexOf("http") < 0) {
@@ -1597,6 +1608,17 @@ function findProxyGroupByName(proxyGroups, groupName) {
   return findNamedItem(proxyGroups, groupName);
 }
 
+// 从常见默认代理组名中选择订阅实际存在的第一个。
+function resolveDefaultProxyGroupName(config) {
+  var proxyGroups = config["proxy-groups"] || [];
+  for (var i = 0; i < BASE.defaultProxyGroupNames.length; i++) {
+    if (findProxyGroupByName(proxyGroups, BASE.defaultProxyGroupNames[i])) {
+      return BASE.defaultProxyGroupNames[i];
+    }
+  }
+  return null;
+}
+
 // 判断给定名称是否在节点或代理组中存在。
 function hasProxyOrGroup(config, targetName) {
   return !!(
@@ -1605,7 +1627,7 @@ function hasProxyOrGroup(config, targetName) {
   );
 }
 
-// 收集匹配地区特征且非 家宽出口 的节点名称列表。
+// 收集匹配地区特征且非家宽出口的节点名称列表。
 function collectRegionNodeNames(proxies, regionRegex) {
   var regionNodeNames = [];
   for (var i = 0; i < proxies.length; i++) {
@@ -1633,16 +1655,17 @@ function upsertRegionUrlTestGroup(proxyGroups, groupName, regionNodeNames) {
 }
 
 // 将代理组追加到节点选择组。
-function writeManagedGroupIntoNodeSelection(config, managedGroupName) {
-  var nodeSelectionGroup = findProxyGroupByName(config["proxy-groups"], BASE.groupNames.nodeSelection);
-  if (!nodeSelectionGroup || !nodeSelectionGroup.proxies) return;
+function writeManagedGroupIntoDefaultProxy(config, managedGroupName, defaultProxyGroupName) {
+  if (!defaultProxyGroupName) return;
+  var defaultProxyGroup = findProxyGroupByName(config["proxy-groups"], defaultProxyGroupName);
+  if (!defaultProxyGroup || !defaultProxyGroup.proxies) return;
 
-  var nextProxyNames = [].concat(nodeSelectionGroup.proxies);
+  var nextProxyNames = [].concat(defaultProxyGroup.proxies);
   nextProxyNames.push(managedGroupName);
-  nodeSelectionGroup.proxies = uniqueStrings(nextProxyNames);
+  defaultProxyGroup.proxies = uniqueStrings(nextProxyNames);
 }
 
-// 注入 家宽出口 官方中转节点。
+// 注入家宽出口官方中转节点。
 function writeResidentialProxies(config, residentialCredentials) {
   upsertNamedItem(
     config.proxies,
@@ -1667,7 +1690,7 @@ function writeRegionGroup(config, region, groupNameSuffix) {
   return groupName;
 }
 
-// 创建家宽出口 select 组（仅保留 家宽出口 官方中转）。
+// 创建家宽出口 select 组（仅保留家宽出口官方中转）。
 function writeResidentialGroup(config) {
   var residentialGroupName = BASE.residentialGroupName;
 
@@ -1720,6 +1743,7 @@ function writeExpandedProxyGroups(config, strictAiTarget, regionalTargets) {
 // 解析路由目标：创建家宽出口组、地区测速组、UI 面板组。
 function resolveRoutingTargets(config) {
   var residentialGroupName = writeResidentialGroup(config);
+  var defaultProxyGroupName = resolveDefaultProxyGroupName(config);
 
   var regionalTargets = {};
   // 为所有已定义地区生成标准 url-test 组
@@ -1728,7 +1752,7 @@ function resolveRoutingTargets(config) {
     var code = definedRegions[i];
     var standardGroup = writeRegionGroup(config, code, BASE.groupNameSuffixes.base);
     if (standardGroup) {
-      writeManagedGroupIntoNodeSelection(config, standardGroup);
+      writeManagedGroupIntoDefaultProxy(config, standardGroup, defaultProxyGroupName);
       regionalTargets[code] = standardGroup;
     }
   }
@@ -1738,13 +1762,15 @@ function resolveRoutingTargets(config) {
 
   return {
     residentialGroupName: residentialGroupName,
+    defaultProxyGroupName: defaultProxyGroupName,
+    defaultProxyTarget: defaultProxyGroupName || residentialGroupName,
     strictAiTarget: residentialGroupName
   };
 }
 
 // 写入分流规则。
 function writeManagedRouting(config, routingTargets, derived) {
-  writeManagedRules(config, derived);
+  writeManagedRules(config, routingTargets, derived);
 }
 
 // ===========================================================================
@@ -1780,10 +1806,10 @@ function dedupeRulesByIdentity(ruleLines) {
 }
 
 // 拼接所有管理规则。顺序即优先级：显式域名优先，进程规则作为最后的应用兜底。
-function buildManagedRules(derived) {
+function buildManagedRules(derived, routingTargets) {
   var concatenated = buildResidentialDomainRules(derived)
     .concat(buildMediaRules(derived))
-    .concat(buildProxyRules(derived))
+    .concat(buildProxyRules(derived, routingTargets.defaultProxyTarget))
     .concat(buildDirectRules(derived))
     .concat(buildChinaFallbackRules())
     .concat(buildStrictProcessRules(derived))
@@ -1829,8 +1855,8 @@ function splitMatchFallback(ruleLines) {
 }
 
 // 注入管理规则（置顶），MATCH 兜底保持在末尾。
-function writeManagedRules(config, derived) {
-  var managedRules = buildManagedRules(derived);
+function writeManagedRules(config, routingTargets, derived) {
+  var managedRules = buildManagedRules(derived, routingTargets);
   var managedRuleIdentities = buildRuleIdentityLookup(managedRules);
   var remainingRules = filterConflictingRules(config.rules, managedRuleIdentities);
   var split = splitMatchFallback(remainingRules);
@@ -1889,9 +1915,9 @@ function buildStrictProcessRules(derived) {
 }
 
 // 生成 DoH 端点的代理规则，确保 DNS 查询在境外加密隧道内完成。
-function buildProxyRules(derived) {
+function buildProxyRules(derived, defaultProxyTarget) {
   var ruleLines = [];
-  appendSuffixRules(ruleLines, derived.patterns.proxy, BASE.groupNames.nodeSelection);
+  appendSuffixRules(ruleLines, derived.patterns.proxy, defaultProxyTarget);
   return ruleLines;
 }
 

@@ -40,12 +40,12 @@ function createBaseConfig() {
       { name: "🇺🇸 US Auto 01", type: "ss" }
     ],
     "proxy-groups": [
-      { name: "办公娱乐好帮手", type: "select", proxies: ["🇸🇬 SG Auto 01"] }
+      { name: "PROXY", type: "select", proxies: ["🇸🇬 SG Auto 01"] }
     ],
     rules: [
       "DOMAIN-SUFFIX,claude.ai,DIRECT",
       "DOMAIN-SUFFIX,tailscale.com,REJECT",
-      "MATCH,办公娱乐好帮手"
+      "MATCH,PROXY"
     ]
   };
 }
@@ -299,6 +299,14 @@ function testNoSeparateBrowserRoutingOption() {
   console.log("  PASS no separate browser routing option");
 }
 
+// ---- default proxy group should not be a subscription-specific name ----
+function testNoHardcodedSubscriptionDefaultProxy() {
+  const subscriptionSpecificName = ["办公", "娱乐", "好帮手"].join("");
+  assert(!overrideCode.includes(subscriptionSpecificName),
+    "Default proxy group must use common names, not a subscription-specific name");
+  console.log("  PASS no hardcoded subscription default proxy");
+}
+
 // ---- FAKE_IP_BYPASS structure ----
 function testFakeIpBypassConstant() {
   const bip = S.DNS_SNIFFER_MODULE.FAKE_IP_BYPASS;
@@ -439,12 +447,13 @@ function assertManagedProxyTopology(output, sandbox) {
   assert.strictEqual(usGroup.type, "url-test");
   assert.deepEqual(usGroup.proxies, ["🇺🇸 US Auto 01"]);
 
-  const nodeSelection = findGroup(output, sandbox.BASE.groupNames.nodeSelection);
-  assert(nodeSelection, "node selection group missing");
+  const defaultProxyGroupName = sandbox.resolveDefaultProxyGroupName(output);
+  const defaultProxyGroup = findGroup(output, defaultProxyGroupName);
+  assert(defaultProxyGroup, "default proxy group missing");
   assertIncludes(
-    nodeSelection.proxies,
+    defaultProxyGroup.proxies,
     ["🇸🇬 SG Auto 01", names.sgRegion, names.usRegion],
-    "node selection includes"
+    "default proxy includes"
   );
 }
 
@@ -455,8 +464,8 @@ function assertManualDispatchGroups(output, sandbox) {
     assert(group, "UI group missing: " + groupName);
     assert.strictEqual(group.type, "select");
     assert.deepEqual(group.proxies, expectedChoices, "dispatch choices mismatch: " + groupName);
-    assert(!group.proxies.includes(sandbox.BASE.groupNames.nodeSelection),
-      "dispatch group must not include base node selection: " + groupName);
+    assert(!group.proxies.includes(sandbox.resolveDefaultProxyGroupName(output)),
+      "dispatch group must not include default proxy group: " + groupName);
   }
 }
 
@@ -514,7 +523,7 @@ function assertBrowserRoutingPriority(output, sandbox) {
   const aiCliRule = "PROCESS-NAME,codex," + sandbox.UI_GROUPS.ai;
   const geositeCnRule = "GEOSITE,cn,DIRECT";
   const geoipCnRule = "GEOIP,CN,DIRECT";
-  const matchRule = "MATCH,办公娱乐好帮手";
+  const matchRule = "MATCH,PROXY";
 
   assertRulesExist(output.rules, [geositeCnRule, geoipCnRule]);
 
@@ -656,6 +665,22 @@ function testDefaultConfig() {
   assertNoDuplicateRuleIdentities(output.rules.slice(0, 250));
 }
 
+function testCommonDefaultProxyNameIsUsed() {
+  const { sandbox, output } = runMain((config) => {
+    config["proxy-groups"] = [
+      { name: "Proxy", type: "select", proxies: ["🇸🇬 SG Auto 01"] }
+    ];
+    config.rules = ["MATCH,Proxy"];
+  });
+  const names = expectedGroupNames(sandbox);
+  const defaultProxyGroup = findGroup(output, "Proxy");
+
+  assert(defaultProxyGroup, "Proxy group missing");
+  assertIncludes(defaultProxyGroup.proxies, [names.sgRegion, names.usRegion], "common default proxy includes");
+  assertRulesExist(output.rules, ["DOMAIN-SUFFIX,dns.google,Proxy"]);
+  assertRulesMissing(output.rules, ["DOMAIN-SUFFIX,dns.google,PROXY"]);
+}
+
 function testRequiresConfiguredResidentialCredentials() {
   assert.throws(() => runMain(null, (sb) => {
     sb.RESIDENTIAL_CREDENTIALS = {
@@ -669,7 +694,7 @@ function testMergedModeDoesNotRequireRegionNodes() {
   const { sandbox, output } = runMain((config) => {
     config.proxies = [];
     config["proxy-groups"] = [
-      { name: "办公娱乐好帮手", type: "select", proxies: [] }
+      { name: "PROXY", type: "select", proxies: [] }
     ];
   });
   const residentialGroup = findGroup(output, sandbox.BASE.residentialGroupName);
@@ -819,9 +844,9 @@ function testRegionGroupsCanBeGeneratedFromHKOnly() {
   const { sandbox, output } = runMain((config) => {
     config.proxies = [{ name: "🇭🇰 HK Auto 01", type: "ss" }];
     config["proxy-groups"] = [
-      { name: "办公娱乐好帮手", type: "select", proxies: ["🇭🇰 HK Auto 01"] }
+      { name: "PROXY", type: "select", proxies: ["🇭🇰 HK Auto 01"] }
     ];
-    config.rules = ["MATCH,办公娱乐好帮手"];
+    config.rules = ["MATCH,PROXY"];
   });
   const suffix = sandbox.BASE.groupNameSuffixes;
   const hkRegion = regionGroupName(sandbox, "HK", suffix.base);
@@ -839,9 +864,9 @@ function testRegionRegexAcceptsEnglishFullName() {
       { name: "Taiwan 03", type: "ss" }
     ];
     config["proxy-groups"] = [
-      { name: "办公娱乐好帮手", type: "select", proxies: ["United States 01"] }
+      { name: "PROXY", type: "select", proxies: ["United States 01"] }
     ];
-    config.rules = ["MATCH,办公娱乐好帮手"];
+    config.rules = ["MATCH,PROXY"];
   });
   const suffix = sandbox.BASE.groupNameSuffixes;
   for (const code of ["US", "HK", "SG", "JP", "TW"]) {
@@ -858,9 +883,9 @@ function testRegionRegexAcceptsUnderscoreAndNoSeparator() {
       { name: "SG01", type: "ss" }
     ];
     config["proxy-groups"] = [
-      { name: "办公娱乐好帮手", type: "select", proxies: ["US_Tokyo_01"] }
+      { name: "PROXY", type: "select", proxies: ["US_Tokyo_01"] }
     ];
-    config.rules = ["MATCH,办公娱乐好帮手"];
+    config.rules = ["MATCH,PROXY"];
   });
   const suffix = sandbox.BASE.groupNameSuffixes;
   assert(findGroup(output, regionGroupName(sandbox, "US", suffix.base)), "US group missing (underscore)");
@@ -899,6 +924,7 @@ const unitTests = [
   testCoreGroupDefinition,
   testNoProviderBrandInScript,
   testNoSeparateBrowserRoutingOption,
+  testNoHardcodedSubscriptionDefaultProxy,
   testFakeIpBypassConstant,
   testDnsConfigContainsFakeIpBypass,
   testHasConfiguredResidentialCredentialsPort,
@@ -908,6 +934,7 @@ const unitTests = [
 
 const integrationTests = [
   testDefaultConfig,
+  testCommonDefaultProxyNameIsUsed,
   testRequiresConfiguredResidentialCredentials,
   testMergedModeDoesNotRequireRegionNodes,
   testUnifiedDnsSnifferOnlyMode,
