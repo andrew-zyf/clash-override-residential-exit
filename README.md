@@ -136,6 +136,26 @@ flowchart TD
 
 规则顺序固定为：高敏域名、媒体域名、DoH 端点、显式直连、CN 兜底、AI 进程兜底、订阅非 `MATCH` 规则、`MATCH`。
 
+### Rule Abbreviations
+
+| 缩写 / 桶名 | 含义 | 典型网站 / 服务 | 出口 |
+|---|---|---|---|
+| `AI` / `RESIDENTIAL_EXIT.ai` | AI 产品与模型平台 | ChatGPT / OpenAI、Claude / Anthropic、Gemini、Perplexity、Cursor、Hugging Face、Midjourney | `az.严管调度.🤖 AI 高敏阵列` |
+| `AI App / CLI` | AI 桌面应用和命令行进程 | Claude、ChatGPT、Perplexity、Cursor、`claude`、`gemini`、`codex` | `az.严管调度.🤖 AI 高敏阵列` |
+| `support` / `RESIDENTIAL_EXIT.support` | AI 与开发常用支撑平台 | Google、Microsoft、GitHub、GitLab、npm、PyPI、Docker、Vercel、Netlify、Stack Overflow、MDN | `az.严管调度.🛠️ 支撑平台` |
+| `integrations` / `RESIDENTIAL_EXIT.integrations` | 登录、反机器人、支付、遥测 | Arkose、reCAPTCHA、hCaptcha、Auth0、Clerk、Okta、Stripe、PayPal、Sentry、PostHog、Segment | `az.严管调度.🛡️ 生态域集成` |
+| `CDN.cloud` | 云厂商与内容分发网络 | Cloudflare、AWS CloudFront、Fastly、Akamai、Azure CDN、jsDelivr、BunnyCDN、Cloudinary | `az.严管调度.🛠️ 支撑平台` |
+| `DoH` / `CDN.doh` | DNS over HTTPS 解析端点 | Google DNS、Cloudflare DNS、Quad9 | 识别出的默认代理组；无默认组时回落到家宽出口 |
+| `MEDIA.video` | 视频流媒体 | YouTube、Netflix、Disney+、Max、Hulu、Prime Video、Twitch | `az.其他调度.🎬 视频流媒体` |
+| `MEDIA.music` | 音乐与音频平台 | Spotify、SoundCloud、Bandcamp | `az.其他调度.🎵 音乐播客` |
+| `MEDIA.social` | 社交与长文平台 | X / Twitter、Facebook、Instagram、Threads、Reddit、TikTok、Snapchat、Pinterest、Bluesky、Medium、Substack | `az.其他调度.🌐 社交长文` |
+| `IM` / `MEDIA.im` | Instant Messaging，即时通讯 | Telegram、Discord、LINE、WhatsApp、Signal | `az.其他调度.💬 即时通讯` |
+| `CN` | 中国大陆站点直连 | 通义千问、DeepSeek、腾讯、钉钉、飞书、WPS、阿里云、腾讯云、百度、Bilibili、微博、淘宝、京东、美团 | `DIRECT` |
+| `LOCAL` | 本地域名与系统推送 | Apple Push、`.lan`、`.local`、`.localhost`、`.home.arpa` | `DIRECT` |
+| `OVERSEAS` | 域外解析但直连的特殊服务 | Apple / iCloud、出口 IP 检测、Tailscale、ZeroTier、Plex、Synology QuickConnect | `DIRECT` |
+| `DNS_ONLY` | 只影响 DNS，不生成分流规则 | CNNIC、12306、IANA、IETF | 不生成 `rules` |
+| `NETWORK` | 私有网段、链路本地、CGNAT、Tailscale 地址 | `10.0.0.0/8`、`192.168.0.0/16`、`100.64.0.0/10`、`fd7a:115c:a1e0::/48` | `DIRECT` |
+
 ## Testing
 
 ```bash
