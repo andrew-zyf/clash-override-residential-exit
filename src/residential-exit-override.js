@@ -1718,22 +1718,27 @@ var UI_GROUPS = {
 function writeExpandedProxyGroups(config, strictAiTarget, regionalTargets) {
   var proxyGroups = config["proxy-groups"];
 
-  var dispatchChoices = [strictAiTarget];
+  var strictDispatchChoices = [strictAiTarget];
   var predefinedOrder = ["US", "HK", "JP", "TW", "SG"];
   for (var j = 0; j < predefinedOrder.length; j++) {
     var target = regionalTargets[predefinedOrder[j]];
-    if (target) dispatchChoices.push(target);
+    if (target) strictDispatchChoices.push(target);
   }
-  dispatchChoices = uniqueStrings(dispatchChoices);
+  strictDispatchChoices = uniqueStrings(strictDispatchChoices);
+
+  var otherDispatchChoices = [];
+  if (regionalTargets.US) otherDispatchChoices.push(regionalTargets.US);
+  otherDispatchChoices = otherDispatchChoices.concat(strictDispatchChoices);
+  otherDispatchChoices = uniqueStrings(otherDispatchChoices);
 
   var subgroups = [
-    { name: UI_GROUPS.ai, type: "select", proxies: dispatchChoices },
-    { name: UI_GROUPS.support, type: "select", proxies: dispatchChoices },
-    { name: UI_GROUPS.integrations, type: "select", proxies: dispatchChoices },
-    { name: UI_GROUPS.video, type: "select", proxies: dispatchChoices },
-    { name: UI_GROUPS.music, type: "select", proxies: dispatchChoices },
-    { name: UI_GROUPS.social, type: "select", proxies: dispatchChoices },
-    { name: UI_GROUPS.im, type: "select", proxies: dispatchChoices }
+    { name: UI_GROUPS.ai, type: "select", proxies: strictDispatchChoices },
+    { name: UI_GROUPS.support, type: "select", proxies: strictDispatchChoices },
+    { name: UI_GROUPS.integrations, type: "select", proxies: strictDispatchChoices },
+    { name: UI_GROUPS.video, type: "select", proxies: otherDispatchChoices },
+    { name: UI_GROUPS.music, type: "select", proxies: otherDispatchChoices },
+    { name: UI_GROUPS.social, type: "select", proxies: otherDispatchChoices },
+    { name: UI_GROUPS.im, type: "select", proxies: otherDispatchChoices }
   ];
   for (var i = 0; i < subgroups.length; i++) {
     upsertNamedItem(proxyGroups, subgroups[i]);

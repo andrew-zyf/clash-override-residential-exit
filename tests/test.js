@@ -100,6 +100,47 @@ function expectedManualDispatchChoices(output, sandbox) {
   return choices;
 }
 
+function expectedOtherDispatchChoices(output, sandbox) {
+  const suffix = sandbox.BASE.groupNameSuffixes;
+  const usGroupName = regionGroupName(sandbox, "US", suffix.base);
+  const choices = [];
+  if (findGroup(output, usGroupName)) choices.push(usGroupName);
+  choices.push(sandbox.BASE.residentialGroupName);
+  for (const code of ["US", "HK", "JP", "TW", "SG"]) {
+    const groupName = regionGroupName(sandbox, code, suffix.base);
+    if (findGroup(output, groupName)) choices.push(groupName);
+  }
+  return uniqueLocalStrings(choices);
+}
+
+function uniqueLocalStrings(values) {
+  const seen = new Set();
+  const result = [];
+  for (const value of values) {
+    if (seen.has(value)) continue;
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
+}
+
+function strictUiGroupNames(sandbox) {
+  return [
+    sandbox.UI_GROUPS.ai,
+    sandbox.UI_GROUPS.support,
+    sandbox.UI_GROUPS.integrations
+  ];
+}
+
+function otherUiGroupNames(sandbox) {
+  return [
+    sandbox.UI_GROUPS.video,
+    sandbox.UI_GROUPS.music,
+    sandbox.UI_GROUPS.social,
+    sandbox.UI_GROUPS.im
+  ];
+}
+
 function uiGroupNames(sandbox) {
   return [
     sandbox.UI_GROUPS.ai,
@@ -464,12 +505,26 @@ function assertManagedProxyTopology(output, sandbox) {
 }
 
 function assertManualDispatchGroups(output, sandbox) {
-  const expectedChoices = expectedManualDispatchChoices(output, sandbox);
-  for (const groupName of uiGroupNames(sandbox)) {
+  const expectedStrictChoices = expectedManualDispatchChoices(output, sandbox);
+  for (const groupName of strictUiGroupNames(sandbox)) {
     const group = findGroup(output, groupName);
     assert(group, "UI group missing: " + groupName);
     assert.strictEqual(group.type, "select");
-    assert.deepEqual(group.proxies, expectedChoices, "dispatch choices mismatch: " + groupName);
+    assert.deepEqual(group.proxies, expectedStrictChoices, "strict dispatch choices mismatch: " + groupName);
+    assert.strictEqual(group.proxies[0], sandbox.BASE.residentialGroupName, "strict dispatch should prefer residential exit: " + groupName);
+    assert(!group.proxies.includes(sandbox.resolveDefaultProxyGroupName(output)),
+      "dispatch group must not include default proxy group: " + groupName);
+  }
+
+  const expectedOtherChoices = expectedOtherDispatchChoices(output, sandbox);
+  const usGroupName = regionGroupName(sandbox, "US", sandbox.BASE.groupNameSuffixes.base);
+  const preferredOtherTarget = findGroup(output, usGroupName) ? usGroupName : sandbox.BASE.residentialGroupName;
+  for (const groupName of otherUiGroupNames(sandbox)) {
+    const group = findGroup(output, groupName);
+    assert(group, "UI group missing: " + groupName);
+    assert.strictEqual(group.type, "select");
+    assert.deepEqual(group.proxies, expectedOtherChoices, "other dispatch choices mismatch: " + groupName);
+    assert.strictEqual(group.proxies[0], preferredOtherTarget, "other dispatch preferred target mismatch: " + groupName);
     assert(!group.proxies.includes(sandbox.resolveDefaultProxyGroupName(output)),
       "dispatch group must not include default proxy group: " + groupName);
   }
