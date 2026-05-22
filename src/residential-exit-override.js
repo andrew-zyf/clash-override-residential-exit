@@ -28,13 +28,7 @@ var RESIDENTIAL_CREDENTIALS = {
 };
 
 // ===========================================================================
-// 1. 运行期状态
-// ===========================================================================
-
-var ACTIVE_USER_OPTIONS = null;
-
-// ===========================================================================
-// 2. 共享工具函数
+// 1. 共享工具函数
 // ===========================================================================
 
 // 对字符串列表做稳定去重，保留首次出现的顺序。
@@ -2235,13 +2229,6 @@ function cloneResidentialCredentials(credentials) {
   };
 }
 
-function cloneUserOptions(options) {
-  return {
-    enabled: options.enabled,
-    overrideMode: options.overrideMode
-  };
-}
-
 function normalizeOverrideMode(mode) {
   if (mode === undefined || mode === null || mode === "") return "merged";
   if (typeof mode !== "string") {
@@ -2273,7 +2260,7 @@ function normalizeOverrideMode(mode) {
 }
 
 function shouldApplyOnlyDnsAndSniffer() {
-  return normalizeOverrideMode(ACTIVE_USER_OPTIONS.overrideMode) === "dns-sniffer-only";
+  return normalizeOverrideMode(USER_OPTIONS.overrideMode) === "dns-sniffer-only";
 }
 
 function resolveConfiguredResidentialCredentials(credentials) {
@@ -2297,9 +2284,7 @@ function preflightMergedMode(config) {
 function main(config) {
   var residentialCredentials = null;
 
-  ACTIVE_USER_OPTIONS = cloneUserOptions(USER_OPTIONS);
-
-  if (ACTIVE_USER_OPTIONS.enabled === false) return config;
+  if (USER_OPTIONS.enabled === false) return config;
 
   if (!shouldApplyOnlyDnsAndSniffer()) {
     residentialCredentials = preflightMergedMode(config);
