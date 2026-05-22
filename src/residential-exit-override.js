@@ -1790,18 +1790,18 @@ var UI_GROUPS = {
   im: "az.其他调度.💬 即时通讯"
 };
 
-// 写入 UI 面板策略组。所有调度统一以美国节点组为默认选择。
+// 写入 UI 面板策略组。调度顺序：US → JP → SG → HK → 家宽出口。
 function writeExpandedProxyGroups(config, residentialTarget, regionalTargets) {
   var proxyGroups = config["proxy-groups"];
 
-  // 统一顺序：家宽出口 → US → SG → JP → HK
-  var dispatchChoices = [residentialTarget];
+  var dispatchChoices = [];
   if (regionalTargets.US) dispatchChoices.push(regionalTargets.US);
-  var remainingRegions = ["SG", "JP", "HK"];
+  var remainingRegions = ["JP", "SG", "HK"];
   for (var j = 0; j < remainingRegions.length; j++) {
     var target = regionalTargets[remainingRegions[j]];
     if (target) dispatchChoices.push(target);
   }
+  dispatchChoices.push(residentialTarget);
   dispatchChoices = uniqueStrings(dispatchChoices);
 
   var subgroups = [

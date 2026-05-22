@@ -18,7 +18,7 @@
 **规则增强**
 - 新增 GFWList 支持：通过 `GEOSITE,gfw` 将 GFW 域路由到默认代理组。
 - 规则新增 `DOMAIN-KEYWORD` 兜底，防止 `DOMAIN-SUFFIX` 实现差异遗漏子域。
-- 调度组候选顺序：🏠 家宽出口 → 🇺🇸 US → 🇸🇬 SG → 🇯🇵 JP → 🇭🇰 HK。
+- 调度组候选顺序：🇺🇸 US → 🇯🇵 JP → 🇸🇬 SG → 🇭🇰 HK → 🏠 家宽出口。
 
 **域名增补**
 - AI：poe.com、cohere.com、grammarly.com、deepl.com、suno.ai、leonardo.ai、replit.com、jasper.ai、gamma.app、codeium.com、windsurf.com、v0.dev、bolt.new、lovable.dev、descript.com、udio.com

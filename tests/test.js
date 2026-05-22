@@ -90,16 +90,17 @@ function expectedGroupNames(sandbox) {
   };
 }
 
-// 所有调度统一顺序：家宽出口 → US → SG → JP → HK
+// 所有调度统一顺序：US → JP → SG → HK → 家宽出口
 function expectedDispatchChoices(output, sandbox) {
   const suffix = sandbox.BASE.groupNameSuffixes;
   const usGroupName = regionGroupName(sandbox, "US", suffix.base);
-  const choices = [sandbox.BASE.residentialGroupName];
+  const choices = [];
   if (findGroup(output, usGroupName)) choices.push(usGroupName);
-  for (const code of ["SG", "JP", "HK"]) {
+  for (const code of ["JP", "SG", "HK"]) {
     const groupName = regionGroupName(sandbox, code, suffix.base);
     if (findGroup(output, groupName)) choices.push(groupName);
   }
+  choices.push(sandbox.BASE.residentialGroupName);
   return choices;
 }
 
@@ -492,7 +493,8 @@ function assertManagedProxyTopology(output, sandbox) {
 
 function assertManualDispatchGroups(output, sandbox) {
   const expectedChoices = expectedDispatchChoices(output, sandbox);
-  const expectedFirst = sandbox.BASE.residentialGroupName;
+  const usGroupName = regionGroupName(sandbox, "US", sandbox.BASE.groupNameSuffixes.base);
+  const expectedFirst = findGroup(output, usGroupName) ? usGroupName : sandbox.BASE.residentialGroupName;
 
   const allGroups = strictUiGroupNames(sandbox).concat(otherUiGroupNames(sandbox));
   for (const groupName of allGroups) {
