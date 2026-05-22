@@ -243,6 +243,13 @@ var RESIDENTIAL_EXIT = {
       "+.readthedocs.org",
       "+.gitbook.io",
       "+.gitbook.com"
+    ],
+    developer_productivity: [
+      "+.notion.so",             // Notion 协作知识库
+      "+.notion.com",
+      "+.linear.app",            // Linear 项目管理
+      "+.figma.com",             // Figma 设计协作
+      "+.figstatic.com"          // Figma 静态资源
     ]
   },
   ai: {
@@ -338,6 +345,31 @@ var RESIDENTIAL_EXIT = {
     character_and_companion: [
       "+.character.ai",
       "+.pi.ai"              // Inflection / Pi
+    ],
+    writing_and_translation: [
+      "+.grammarly.com",     // Grammarly AI 写作助手
+      "+.grammarly.io",
+      "+.deepl.com"          // DeepL AI 翻译
+    ],
+    ai_creative_tools: [
+      "+.suno.ai",           // AI 音乐生成
+      "+.udio.com",          // Udio AI 音乐
+      "+.leonardo.ai",       // AI 图像生成
+      "+.descript.com"       // AI 视频/音频编辑
+    ],
+    ai_platforms: [
+      "+.poe.com",           // Quora Poe AI 平台
+      "+.cohere.com",        // Cohere 企业 AI API
+      "+.replit.com",        // Replit AI 编程平台
+      "+.jasper.ai",         // Jasper AI 写作
+      "+.gamma.app"          // Gamma AI 演示文稿
+    ],
+    ai_coding: [
+      "+.codeium.com",       // Windsurf AI IDE
+      "+.windsurf.com",
+      "+.v0.dev",            // Vercel AI UI builder
+      "+.bolt.new",          // StackBlitz AI 编程
+      "+.lovable.dev"        // Lovable AI 应用构建
     ]
   },
   // AI 会话共享的第三方集成（反作弊、鉴权、支付、遥测）。
@@ -364,6 +396,12 @@ var RESIDENTIAL_EXIT = {
       "+.paypalobjects.com", // PayPal CDN
       "+.paddle.com",      // Paddle（Apple 友好的订阅平台）
       "+.lemonsqueezy.com" // 独立 AI 应用常用
+    ],
+    customer_engagement: [
+      "+.intercom.io",      // Intercom 客服（Anthropic / OpenAI 等使用）
+      "+.intercomcdn.com",
+      "+.launchdarkly.com", // LaunchDarkly feature flag
+      "+.fullstory.com"     // FullStory 会话录制
     ],
     telemetry: [
       "+.statsig.com",     // Claude Code / Claude.ai / ChatGPT 的 feature flag
@@ -439,7 +477,6 @@ var CDN = {
   },
   cloud: {
     cloudflare: [
-      "+.cloudflare-dns.com",
       "+.cdn.cloudflare.net",
       "+.workers.dev",
       "+.pages.dev"
@@ -621,6 +658,10 @@ var MEDIA = {
   niche_communities: [
     "+.goodreads.com",     // 读书
     "+.letterboxd.com"     // 电影日记
+  ],
+  linkedin: [
+    "+.linkedin.com",      // LinkedIn 职业社交
+    "+.licdn.com"          // LinkedIn CDN
   ]
   },
   im: {
@@ -650,6 +691,15 @@ var MEDIA = {
   ],
   signal: [
     "+.signal.org"
+  ],
+  slack: [
+    "+.slack.com",       // Slack 企业即时通讯
+    "+.slack-edge.com",
+    "+.slack-imgs.com"
+  ],
+  zoom: [
+    "+.zoom.us",         // Zoom 视频会议
+    "+.zoomgov.com"
   ]
   }
 };
@@ -980,7 +1030,12 @@ var EXPECTED_ROUTES = {
       "stripe.com",            // AI 订阅支付（integrations.payments）
       "statsig.com",           // feature flag（integrations.telemetry）
       "githubusercontent.com", // GitHub 原始内容，GFW 下易污染
-      "npmjs.org"              // npm 官方 registry
+      "npmjs.org",             // npm 官方 registry
+      "poe.com",               // Quora Poe AI 平台
+      "grammarly.com",         // Grammarly AI 写作
+      "deepl.com",             // DeepL AI 翻译
+      "notion.so",             // Notion 协作知识库
+      "intercom.io"            // Intercom 客服（Anthropic 等使用）
     ],
     processNames: ["Claude"],
     cliNames: ["claude", "codex"]
@@ -992,7 +1047,10 @@ var EXPECTED_ROUTES = {
       "twitch.tv",       // 直播
       "spotify.com",     // 音乐
       "line.me",         // IM
-      "whatsapp.com"     // IM
+      "whatsapp.com",    // IM
+      "slack.com",       // IM（企业即时通讯）
+      "linkedin.com",    // 社交（职业社交）
+      "zoom.us"          // IM（视频会议）
     ]
   }
 };
@@ -1071,7 +1129,7 @@ function flattenGroupedPatterns(groupedPatterns) {
 // ---------------------------------------------------------------------------
 
 // POLICY — 所有域名模式的单一权威来源。
-// 每条 entry 声明 route / dnsZone / sniffer / fakeIpBypass / fallbackFilter。
+// 每条 entry 声明 route / dnsZone / sniffer / fakeIpBypass。
 // 下游 DNS、Sniffer、规则、断言都从 POLICY 投影。
 //
 // 字段：
@@ -1081,7 +1139,9 @@ function flattenGroupedPatterns(groupedPatterns) {
 //   dnsZone        "overseas" | "domestic"，省略 = 不进 nameserver-policy
 //   sniffer        "force" | "skip"，省略 = 不参与 sniffer
 //   fakeIpBypass   true = 进入 fake-ip-filter
-//   fallbackFilter true = 进入 fallback-filter.domain
+//
+// fallback-filter 只使用 geoip + gfw geosite 兜底，不逐条 domain 列表，
+// 因为 nameserver-policy 已将高价值域名显式绑定 DoH。
 //
 // 冲突解决：direct 优先于 residential/media（派生时 excludeStrings）。
 function buildPolicy() {
@@ -1210,7 +1270,6 @@ function matchSniffer(mode) {
   return function (entry) { return entry.sniffer === mode; };
 }
 function matchFakeIpBypass(entry) { return entry.fakeIpBypass === true; }
-function matchFallbackFilter(entry) { return entry.fallbackFilter === true; }
 
 // 按 route 投影并应用 direct 优先级。
 function projectRoutedPatterns(route, directPatterns) {
@@ -1263,7 +1322,7 @@ function buildDerivedPatterns() {
     //   force → 家宽出口域名 + 所有 sniffer:"force" 条目（Cloudflare 等）
     //   skip  → Tailscale / Plex / Apple 推送等故意用 IP 语义的直连应用
     sniffer: {
-      force: mergeStringGroups([residentialAll, projectPolicyPatterns(matchSniffer("force"))]),
+      force: residentialAll,
       skip: projectPolicyPatterns(matchSniffer("skip"))
     }
   };
@@ -1379,15 +1438,14 @@ function buildDnsFakeIpFilter(derived) {
 }
 
 // DNS fallback-filter 配置。
-// AI / DoH / 媒体等高价值域名已在 nameserver-policy 中显式绑定 DoH，
-// 这里兜底处理未被显式覆盖的域名：geoip: true 让非 CN IP 走 fallback DoH。
+// nameserver-policy 已将高价值域名显式绑定 DoH，不需要 domain 列表重复。
+// geoip + gfw 兜底处理未被显式覆盖的域名。
 function buildDnsFallbackFilter() {
   return {
     geoip: true,
     "geoip-code": "CN",
     geosite: ["gfw"],
-    ipcidr: ["240.0.0.0/4", "0.0.0.0/32"],
-    domain: projectPolicyPatterns(matchFallbackFilter)
+    ipcidr: ["240.0.0.0/4", "0.0.0.0/32"]
   };
 }
 
@@ -1736,11 +1794,10 @@ var UI_GROUPS = {
 function writeExpandedProxyGroups(config, residentialTarget, regionalTargets) {
   var proxyGroups = config["proxy-groups"];
 
-  // 统一顺序：US 优先 → 家宽出口 → HK → JP → SG
-  var dispatchChoices = [];
+  // 统一顺序：家宽出口 → US → SG → JP → HK
+  var dispatchChoices = [residentialTarget];
   if (regionalTargets.US) dispatchChoices.push(regionalTargets.US);
-  dispatchChoices.push(residentialTarget);
-  var remainingRegions = ["HK", "JP", "SG"];
+  var remainingRegions = ["SG", "JP", "HK"];
   for (var j = 0; j < remainingRegions.length; j++) {
     var target = regionalTargets[remainingRegions[j]];
     if (target) dispatchChoices.push(target);

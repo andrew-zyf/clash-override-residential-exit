@@ -6,24 +6,31 @@
 
 ## v13.0 (2026-05-22)
 
+**架构变更**
 - 新增 `USER_OPTIONS.enabled` 总开关，`false` 时 config 原样透传。
 - 订阅全接管：丢弃所有订阅规则和非默认代理组，只保留节点和默认代理组。
 - 默认代理组识别：关键词 + MATCH 规则兜底，大小写不敏感。
 - 家宽出口和分区测速组注入默认代理组，清理失效引用。
 - MATCH / DoH / GFW 统一指向订阅默认代理组。
-- 新增 GFWList 支持：通过 `GEOSITE,gfw` 将 GFW 域路由到默认代理组。
 - 清除订阅 `rule-providers`，防止 RULE-SET 规则逃逸。
-- 规则新增 `DOMAIN-KEYWORD` 兜底，防止 `DOMAIN-SUFFIX` 实现差异遗漏子域。
-- 所有调度组候选顺序统一为 🇺🇸 美国节点组优先，家宽出口作为备选。
 - 移除 🇹🇼 台湾分区组。
 
-## v12.0 (2026-05-09)
+**规则增强**
+- 新增 GFWList 支持：通过 `GEOSITE,gfw` 将 GFW 域路由到默认代理组。
+- 规则新增 `DOMAIN-KEYWORD` 兜底，防止 `DOMAIN-SUFFIX` 实现差异遗漏子域。
+- 调度组候选顺序：🏠 家宽出口 → 🇺🇸 US → 🇸🇬 SG → 🇯🇵 JP → 🇭🇰 HK。
 
-- 项目名更新为 `clash-override-residential-exit`。
-- 覆写脚本改名为 `src/residential-exit-override.js`。
-- 运行时代码改为通用家宽出口语义：核心出口组为 `az.核心出口.🏠 家宽出口`，只包含 `家宽出口（官方中转）`。
-- 默认代理组改为按 `PROXY`、`节点选择`、`手动选择`、`GLOBAL` 四个核心词自动识别，并忽略前后缀。
-- 调度组默认顺序调整为：`az.严管调度.*` 优选家宽出口，`az.其他调度.*` 优选美国分区组。
-- AI 浏览器进程并入 `az.严管调度.🤖 AI 高敏阵列`，不再提供单独开关。
-- 文档重写为当前架构说明，并移除全部图片引用；架构图改用 Mermaid。
-- 删除仓库内 PNG 配图资源。
+**域名增补**
+- AI：poe.com、cohere.com、grammarly.com、deepl.com、suno.ai、leonardo.ai、replit.com、jasper.ai、gamma.app、codeium.com、windsurf.com、v0.dev、bolt.new、lovable.dev、descript.com、udio.com
+- 支撑平台：notion.so、linear.app、figma.com
+- 集成：intercom.io、launchdarkly.com、fullstory.com
+- IM：slack.com、zoom.us
+- 社交：linkedin.com
+
+**DNS 优化**
+- 移除 `fallback-filter.domain`（与 `nameserver-policy` 重复，nameserver-policy 已逐条绑定 DoH）
+- 简化 `sniffer.force-domain`（residentialAll 已覆盖所有 force 条目）
+- 修复 `cloudflare-dns.com` 双重归类（同时出现在 CDN.doh 和 CDN.cloud）
+
+**文档**
+- README 重构：精简 Rule Abbreviations 表、合并配置与快速开始、缩减至约 110 行。

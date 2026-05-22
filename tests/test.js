@@ -90,14 +90,13 @@ function expectedGroupNames(sandbox) {
   };
 }
 
-// 所有调度统一顺序：US 优先 → 家宽出口 → HK → JP → SG
+// 所有调度统一顺序：家宽出口 → US → SG → JP → HK
 function expectedDispatchChoices(output, sandbox) {
   const suffix = sandbox.BASE.groupNameSuffixes;
   const usGroupName = regionGroupName(sandbox, "US", suffix.base);
-  const choices = [];
+  const choices = [sandbox.BASE.residentialGroupName];
   if (findGroup(output, usGroupName)) choices.push(usGroupName);
-  choices.push(sandbox.BASE.residentialGroupName);
-  for (const code of ["HK", "JP", "SG"]) {
+  for (const code of ["SG", "JP", "HK"]) {
     const groupName = regionGroupName(sandbox, code, suffix.base);
     if (findGroup(output, groupName)) choices.push(groupName);
   }
@@ -493,8 +492,7 @@ function assertManagedProxyTopology(output, sandbox) {
 
 function assertManualDispatchGroups(output, sandbox) {
   const expectedChoices = expectedDispatchChoices(output, sandbox);
-  const usGroupName = regionGroupName(sandbox, "US", sandbox.BASE.groupNameSuffixes.base);
-  const expectedFirst = findGroup(output, usGroupName) ? usGroupName : sandbox.BASE.residentialGroupName;
+  const expectedFirst = sandbox.BASE.residentialGroupName;
 
   const allGroups = strictUiGroupNames(sandbox).concat(otherUiGroupNames(sandbox));
   for (const groupName of allGroups) {
@@ -502,7 +500,7 @@ function assertManualDispatchGroups(output, sandbox) {
     assert(group, "UI group missing: " + groupName);
     assert.strictEqual(group.type, "select");
     assert.deepEqual(group.proxies, expectedChoices, "dispatch choices mismatch: " + groupName);
-    assert.strictEqual(group.proxies[0], expectedFirst, "dispatch should prefer US region: " + groupName);
+    assert.strictEqual(group.proxies[0], expectedFirst, "dispatch should prefer residential exit: " + groupName);
   }
 }
 
@@ -620,7 +618,7 @@ function assertOverseasAppDirectCoverage(output, dnsBase) {
     "PROCESS-NAME,tailscale,DIRECT"
   ]);
   assertNameserverPolicyValues(output, overseasAppDomains, dnsBase.overseas);
-  assertIncludes(output.dns["fallback-filter"].domain, overseasAppDomains, "fallback-filter.domain");
+  assert.strictEqual(output.dns["fallback-filter"].domain, undefined, "fallback-filter.domain should be absent");
   assertIncludes(output.sniffer["skip-domain"], overseasAppDomains, "sniffer.skip-domain");
   assertExcludes(output.dns["fake-ip-filter"], ["+.tailscale.com"], "fake-ip-filter");
 }
@@ -631,7 +629,7 @@ function assertOverseasDohDirectCoverage(output, dnsBase) {
     "DOMAIN-SUFFIX," + d.replace("+.", "") + ",DIRECT"
   ));
   assertNameserverPolicyValues(output, domains, dnsBase.overseas);
-  assertIncludes(output.dns["fallback-filter"].domain, domains, "fallback-filter.domain");
+  assert.strictEqual(output.dns["fallback-filter"].domain, undefined, "fallback-filter.domain should be absent");
   assertIncludes(output.sniffer["skip-domain"], domains, "sniffer.skip-domain");
 }
 
@@ -657,11 +655,7 @@ function assertDnsAndSniffer(output, dnsBase) {
   assertNameserverPolicyValues(output, ["+.iana.org", "+.ietf.org"], dnsBase.overseas);
 
   assertIncludes(output.dns["fake-ip-filter"], ["+.push.apple.com", "+.xboxlive.com", "stun.*.*"], "fake-ip-filter");
-  assertIncludes(
-    output.dns["fallback-filter"].domain,
-    ["+.sora.com", "+.youtube.com", "+.meta.ai", "+.iana.org", "+.ietf.org"],
-    "fallback-filter.domain"
-  );
+  assert.strictEqual(output.dns["fallback-filter"].domain, undefined, "fallback-filter.domain should be absent");
   assertIncludes(
     output.sniffer["force-domain"],
     ["+.openai.com", "+.chatgpt.com", "+.claude.ai", "+.anthropic.com", "+.cloudflare.com"],
