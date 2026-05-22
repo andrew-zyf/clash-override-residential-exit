@@ -4,6 +4,19 @@
 
 ---
 
+## v13.0 (2026-05-22)
+
+- 新增 `USER_OPTIONS.enabled` 总开关，`false` 时 config 原样透传。
+- 订阅全接管：丢弃所有订阅规则和非默认代理组，只保留节点和默认代理组。
+- 默认代理组识别：关键词 + MATCH 规则兜底，大小写不敏感。
+- 家宽出口和分区测速组注入默认代理组，清理失效引用。
+- MATCH / DoH / GFW 统一指向订阅默认代理组。
+- 新增 GFWList 支持：通过 `GEOSITE,gfw` 将 GFW 域路由到默认代理组。
+- 清除订阅 `rule-providers`，防止 RULE-SET 规则逃逸。
+- 规则新增 `DOMAIN-KEYWORD` 兜底，防止 `DOMAIN-SUFFIX` 实现差异遗漏子域。
+- 所有调度组候选顺序统一为 🇺🇸 美国节点组优先，家宽出口作为备选。
+- 移除 🇹🇼 台湾分区组。
+
 ## v12.0 (2026-05-09)
 
 - 项目名更新为 `clash-override-residential-exit`。

@@ -6,13 +6,14 @@
 //
 // 单文件说明：由旧 config + override 两个入口合并而来。
 //
-// @version 12.0
+// @version 13.0
 
 // ===========================================================================
 // 用户配置
 // ===========================================================================
 
 var USER_OPTIONS = {
+  enabled: true, // false = 关闭覆写，config 原样透传
   // overrideMode: "dns-sniffer-only", // dns-sniffer-only = 只写 DNS/Sniffer
   overrideMode: "merged" // merged = DNS/Sniffer + 家宽/媒体分流
 };
@@ -1481,8 +1482,7 @@ var BASE = {
     US: { regex: /🇺🇸|美国|United\s*States|^US(?:[|丨\-_ ]|\d)/i, label: "美国", flag: "🇺🇸" },
     JP: { regex: /🇯🇵|日本|Japan|^JP(?:[|丨\-_ ]|\d)/i, label: "日本", flag: "🇯🇵" },
     HK: { regex: /🇭🇰|香港|Hong\s*Kong|^HK(?:[|丨\-_ ]|\d)/i, label: "香港", flag: "🇭🇰" },
-    SG: { regex: /🇸🇬|新加坡|Singapore|^SG(?:[|丨\-_ ]|\d)/i, label: "新加坡", flag: "🇸🇬" },
-    TW: { regex: /🇹🇼|台湾|Taiwan|^TW(?:[|丨\-_ ]|\d)/i, label: "台湾", flag: "🇹🇼" }
+    SG: { regex: /🇸🇬|新加坡|Singapore|^SG(?:[|丨\-_ ]|\d)/i, label: "新加坡", flag: "🇸🇬" }
   },
   nodeNames: {
     transit: "家宽出口（官方中转）"
@@ -1600,13 +1600,13 @@ function findProxyGroupByName(proxyGroups, groupName) {
   return findNamedItem(proxyGroups, groupName);
 }
 
-// 判断代理组名是否包含默认代理核心词；允许订阅在核心词前后添加图标或说明。
+// 判断代理组名是否包含默认代理核心词。
 function defaultProxyGroupNameMatches(groupName, keyword) {
   if (typeof groupName !== "string" || typeof keyword !== "string") return false;
   return groupName.toUpperCase().indexOf(keyword.toUpperCase()) >= 0;
 }
 
-// 从常见默认代理核心词中选择订阅实际存在的第一个，返回订阅里的完整组名。
+// 识别订阅默认代理组：先关键词匹配，失败时从 MATCH 规则提取。
 function resolveDefaultProxyGroupName(config) {
   var proxyGroups = config["proxy-groups"] || [];
   for (var i = 0; i < BASE.defaultProxyGroupKeywords.length; i++) {
@@ -1616,7 +1616,35 @@ function resolveDefaultProxyGroupName(config) {
       }
     }
   }
+  return resolveDefaultGroupFromMatch(config);
+}
+
+// 从 MATCH 规则提取默认代理组名。
+function resolveDefaultGroupFromMatch(config) {
+  var rules = config.rules || [];
+  for (var i = rules.length - 1; i >= 0; i--) {
+    var line = rules[i];
+    if (line.indexOf(BASE.rulePrefixes.match) === 0) {
+      var commaIndex = line.indexOf(",");
+      if (commaIndex >= 0) {
+        var targetName = line.substring(commaIndex + 1);
+        if (findProxyGroupByName(config["proxy-groups"], targetName)) {
+          return targetName;
+        }
+      }
+    }
+  }
   return null;
+}
+
+// 将管理组追加到订阅默认代理组的候选列表。
+function writeManagedGroupIntoDefaultProxy(config, managedGroupName, defaultProxyGroupName) {
+  if (!defaultProxyGroupName) return;
+  var defaultProxyGroup = findProxyGroupByName(config["proxy-groups"], defaultProxyGroupName);
+  if (!defaultProxyGroup || !defaultProxyGroup.proxies) return;
+  var nextProxyNames = [].concat(defaultProxyGroup.proxies);
+  nextProxyNames.push(managedGroupName);
+  defaultProxyGroup.proxies = uniqueStrings(nextProxyNames);
 }
 
 // 判断给定名称是否在节点或代理组中存在。
@@ -1655,16 +1683,6 @@ function upsertRegionUrlTestGroup(proxyGroups, groupName, regionNodeNames) {
 }
 
 // 将代理组追加到节点选择组。
-function writeManagedGroupIntoDefaultProxy(config, managedGroupName, defaultProxyGroupName) {
-  if (!defaultProxyGroupName) return;
-  var defaultProxyGroup = findProxyGroupByName(config["proxy-groups"], defaultProxyGroupName);
-  if (!defaultProxyGroup || !defaultProxyGroup.proxies) return;
-
-  var nextProxyNames = [].concat(defaultProxyGroup.proxies);
-  nextProxyNames.push(managedGroupName);
-  defaultProxyGroup.proxies = uniqueStrings(nextProxyNames);
-}
-
 // 注入家宽出口官方中转节点。
 function writeResidentialProxies(config, residentialCredentials) {
   upsertNamedItem(
@@ -1714,31 +1732,29 @@ var UI_GROUPS = {
   im: "az.其他调度.💬 即时通讯"
 };
 
-// 写入 UI 面板策略组。
-function writeExpandedProxyGroups(config, strictAiTarget, regionalTargets) {
+// 写入 UI 面板策略组。所有调度统一以美国节点组为默认选择。
+function writeExpandedProxyGroups(config, residentialTarget, regionalTargets) {
   var proxyGroups = config["proxy-groups"];
 
-  var strictDispatchChoices = [strictAiTarget];
-  var predefinedOrder = ["US", "HK", "JP", "TW", "SG"];
-  for (var j = 0; j < predefinedOrder.length; j++) {
-    var target = regionalTargets[predefinedOrder[j]];
-    if (target) strictDispatchChoices.push(target);
+  // 统一顺序：US 优先 → 家宽出口 → HK → JP → SG
+  var dispatchChoices = [];
+  if (regionalTargets.US) dispatchChoices.push(regionalTargets.US);
+  dispatchChoices.push(residentialTarget);
+  var remainingRegions = ["HK", "JP", "SG"];
+  for (var j = 0; j < remainingRegions.length; j++) {
+    var target = regionalTargets[remainingRegions[j]];
+    if (target) dispatchChoices.push(target);
   }
-  strictDispatchChoices = uniqueStrings(strictDispatchChoices);
-
-  var otherDispatchChoices = [];
-  if (regionalTargets.US) otherDispatchChoices.push(regionalTargets.US);
-  otherDispatchChoices = otherDispatchChoices.concat(strictDispatchChoices);
-  otherDispatchChoices = uniqueStrings(otherDispatchChoices);
+  dispatchChoices = uniqueStrings(dispatchChoices);
 
   var subgroups = [
-    { name: UI_GROUPS.ai, type: "select", proxies: strictDispatchChoices },
-    { name: UI_GROUPS.support, type: "select", proxies: strictDispatchChoices },
-    { name: UI_GROUPS.integrations, type: "select", proxies: strictDispatchChoices },
-    { name: UI_GROUPS.video, type: "select", proxies: otherDispatchChoices },
-    { name: UI_GROUPS.music, type: "select", proxies: otherDispatchChoices },
-    { name: UI_GROUPS.social, type: "select", proxies: otherDispatchChoices },
-    { name: UI_GROUPS.im, type: "select", proxies: otherDispatchChoices }
+    { name: UI_GROUPS.ai, type: "select", proxies: dispatchChoices },
+    { name: UI_GROUPS.support, type: "select", proxies: dispatchChoices },
+    { name: UI_GROUPS.integrations, type: "select", proxies: dispatchChoices },
+    { name: UI_GROUPS.video, type: "select", proxies: dispatchChoices },
+    { name: UI_GROUPS.music, type: "select", proxies: dispatchChoices },
+    { name: UI_GROUPS.social, type: "select", proxies: dispatchChoices },
+    { name: UI_GROUPS.im, type: "select", proxies: dispatchChoices }
   ];
   for (var i = 0; i < subgroups.length; i++) {
     upsertNamedItem(proxyGroups, subgroups[i]);
@@ -1750,9 +1766,12 @@ function resolveRoutingTargets(config) {
   var residentialGroupName = writeResidentialGroup(config);
   var defaultProxyGroupName = resolveDefaultProxyGroupName(config);
 
+  // 将家宽出口组注入订阅默认代理组的候选列表
+  writeManagedGroupIntoDefaultProxy(config, residentialGroupName, defaultProxyGroupName);
+
   var regionalTargets = {};
   // 为所有已定义地区生成标准 url-test 组
-  var definedRegions = ["US", "JP", "HK", "SG", "TW"];
+  var definedRegions = ["US", "JP", "HK", "SG"];
   for (var i = 0; i < definedRegions.length; i++) {
     var code = definedRegions[i];
     var standardGroup = writeRegionGroup(config, code, BASE.groupNameSuffixes.base);
@@ -1765,12 +1784,50 @@ function resolveRoutingTargets(config) {
   // 注入 UI 面板分组
   writeExpandedProxyGroups(config, residentialGroupName, regionalTargets);
 
+  // 清除订阅自带的代理组，只保留 az.* 管理组和默认代理组
+  cleanupSubscriptionProxyGroups(config, defaultProxyGroupName);
+
   return {
     residentialGroupName: residentialGroupName,
-    defaultProxyGroupName: defaultProxyGroupName,
     defaultProxyTarget: defaultProxyGroupName || residentialGroupName,
     strictAiTarget: residentialGroupName
   };
+}
+
+// 清除订阅自带的代理组（自动选择、故障转移、Bahamut 等），
+// 只保留 az.* 管理组和订阅默认代理组作为 MATCH/DoH/GFW 出口。
+function cleanupSubscriptionProxyGroups(config, defaultProxyGroupName) {
+  var groups = config["proxy-groups"];
+  var managedGroups = [];
+
+  for (var i = 0; i < groups.length; i++) {
+    var gName = groups[i].name;
+    if (gName.indexOf("az.") === 0 || gName === defaultProxyGroupName) {
+      managedGroups.push(groups[i]);
+    }
+  }
+
+  // 清理默认组中指向已删除订阅组的引用
+  if (defaultProxyGroupName) {
+    for (var j = 0; j < managedGroups.length; j++) {
+      if (managedGroups[j].name === defaultProxyGroupName && managedGroups[j].proxies) {
+        var cleanProxies = [];
+        var oldProxies = managedGroups[j].proxies;
+        for (var k = 0; k < oldProxies.length; k++) {
+          var pName = oldProxies[k];
+          if (pName === "DIRECT" || pName === "REJECT" ||
+              pName.indexOf("az.") === 0 ||
+              findProxyByName(config.proxies, pName)) {
+            cleanProxies.push(pName);
+          }
+        }
+        managedGroups[j].proxies = cleanProxies;
+        break;
+      }
+    }
+  }
+
+  config["proxy-groups"] = managedGroups;
 }
 
 // 写入分流规则。
@@ -1810,64 +1867,34 @@ function dedupeRulesByIdentity(ruleLines) {
   return deduped;
 }
 
-// 拼接所有管理规则。顺序即优先级：显式域名优先，进程规则作为最后的应用兜底。
+// 拼接所有管理规则。顺序即优先级：显式域名 → 媒体 → DoH → 直连 → CN → GFW → 进程 → MATCH。
 function buildManagedRules(derived, routingTargets) {
   var concatenated = buildResidentialDomainRules(derived)
     .concat(buildMediaRules(derived))
     .concat(buildProxyRules(derived, routingTargets.defaultProxyTarget))
     .concat(buildDirectRules(derived))
     .concat(buildChinaFallbackRules())
+    .concat(buildGfwProxyRule(routingTargets.defaultProxyTarget))
     .concat(buildStrictProcessRules(derived))
     .concat(buildBrowserResidentialRules(derived));
   return dedupeRulesByIdentity(concatenated);
 }
 
-// 把规则数组转换成便于查询的规则标识表。
-function buildRuleIdentityLookup(ruleLines) {
-  var ruleIdentityLookup = {};
-  for (var i = 0; i < ruleLines.length; i++) {
-    var ruleIdentity = getRuleIdentity(ruleLines[i]);
-    if (ruleIdentity) ruleIdentityLookup[ruleIdentity] = true;
-  }
-  return ruleIdentityLookup;
-}
 
-// 过滤掉与管理规则命中同一标识的原始订阅规则。
-function filterConflictingRules(ruleLines, blockedRuleIdentities) {
-  var filteredRules = [];
-  for (var i = 0; i < ruleLines.length; i++) {
-    var ruleIdentity = getRuleIdentity(ruleLines[i]);
-    if (ruleIdentity === null || !blockedRuleIdentities[ruleIdentity]) {
-      filteredRules.push(ruleLines[i]);
-    }
-  }
-  return filteredRules;
-}
-
-// 将原始规则拆成"非 MATCH 兜底"与"MATCH 兜底"两段，保留后者在末尾以不破坏 Clash 兜底语义。
-function splitMatchFallback(ruleLines) {
-  var nonMatch = [];
-  var matchTail = [];
-  for (var i = 0; i < ruleLines.length; i++) {
-    var line = ruleLines[i];
-    if (line.indexOf(BASE.rulePrefixes.match) === 0) {
-      matchTail.push(line);
-    } else {
-      nonMatch.push(line);
-    }
-  }
-  return { nonMatch: nonMatch, matchTail: matchTail };
-}
-
-// 注入管理规则（置顶），MATCH 兜底保持在末尾。
+// 注入管理规则（置顶），由脚本生成 MATCH 兜底。
+// 同时清除订阅的 rule-providers，防止 RULE-SET 规则逃逸。
 function writeManagedRules(config, routingTargets, derived) {
   var managedRules = buildManagedRules(derived, routingTargets);
-  var managedRuleIdentities = buildRuleIdentityLookup(managedRules);
-  var remainingRules = filterConflictingRules(config.rules, managedRuleIdentities);
-  var split = splitMatchFallback(remainingRules);
 
-  // 管理规则置顶 → 剩余非兜底规则 → MATCH 兜底永远在最后。
-  config.rules = managedRules.concat(split.nonMatch).concat(split.matchTail);
+  // 清空所有订阅规则，写入管理规则 + 管理 MATCH
+  config.rules.length = 0;
+  config.rules.push.apply(config.rules, managedRules);
+  config.rules.push("MATCH," + routingTargets.defaultProxyTarget);
+
+  // 清除订阅 rule-providers
+  if (typeof config["rule-providers"] === "object" && config["rule-providers"] !== null) {
+    config["rule-providers"] = {};
+  }
 }
 
 // 批量追加指定类型规则。
@@ -1884,6 +1911,21 @@ function appendSuffixRules(ruleLines, domains, target) {
     suffixes.push(toSuffix(domains[i]));
   }
   appendTypedRules(ruleLines, suffixes, "DOMAIN-SUFFIX", target);
+}
+
+// 从域名后缀中提取二级域关键词，生成 DOMAIN-KEYWORD 兜底规则。
+// 用于接住 DOMAIN-SUFFIX 未能匹配的子域（如 bps.openai.com 不被 suffix 匹配时）。
+function appendKeywordRules(ruleLines, domains, target) {
+  var seen = {};
+  for (var i = 0; i < domains.length; i++) {
+    var suffix = toSuffix(domains[i]);
+    var dotIndex = suffix.indexOf(".");
+    if (dotIndex <= 0) continue;
+    var keyword = suffix.substring(0, dotIndex);
+    if (keyword.length < 3 || seen[keyword]) continue;
+    seen[keyword] = true;
+    ruleLines.push("DOMAIN-KEYWORD," + keyword + "," + target);
+  }
 }
 
 // 批量追加 `PROCESS-NAME` 规则。
@@ -1907,8 +1949,11 @@ function buildStrictProcessGroups(derived) {
 function buildResidentialDomainRules(derived) {
   var ruleLines = [];
   appendSuffixRules(ruleLines, derived.patterns.residential.ai, UI_GROUPS.ai);
+  appendKeywordRules(ruleLines, derived.patterns.residential.ai, UI_GROUPS.ai);
   appendSuffixRules(ruleLines, derived.patterns.residential.support, UI_GROUPS.support);
+  appendKeywordRules(ruleLines, derived.patterns.residential.support, UI_GROUPS.support);
   appendSuffixRules(ruleLines, derived.patterns.residential.integrations, UI_GROUPS.integrations);
+  appendKeywordRules(ruleLines, derived.patterns.residential.integrations, UI_GROUPS.integrations);
   return ruleLines;
 }
 
@@ -1937,9 +1982,13 @@ function buildBrowserResidentialRules(derived) {
 function buildMediaRules(derived) {
   var ruleLines = [];
   appendSuffixRules(ruleLines, derived.patterns.media.video, UI_GROUPS.video);
+  appendKeywordRules(ruleLines, derived.patterns.media.video, UI_GROUPS.video);
   appendSuffixRules(ruleLines, derived.patterns.media.music, UI_GROUPS.music);
+  appendKeywordRules(ruleLines, derived.patterns.media.music, UI_GROUPS.music);
   appendSuffixRules(ruleLines, derived.patterns.media.social, UI_GROUPS.social);
+  appendKeywordRules(ruleLines, derived.patterns.media.social, UI_GROUPS.social);
   appendSuffixRules(ruleLines, derived.patterns.media.im, UI_GROUPS.im);
+  appendKeywordRules(ruleLines, derived.patterns.media.im, UI_GROUPS.im);
   return ruleLines;
 }
 
@@ -1960,6 +2009,11 @@ function buildChinaFallbackRules() {
     "GEOSITE,cn," + BASE.ruleTargets.direct,
     "GEOIP,CN," + BASE.ruleTargets.direct
   ];
+}
+
+// 生成 GFWList 代理规则，GFW 域通过 GEOSITE,gfw 走默认代理组。
+function buildGfwProxyRule(defaultProxyTarget) {
+  return ["GEOSITE,gfw," + defaultProxyTarget];
 }
 
 // 基于预构建的规则行查找表 O(1) 断言管理规则是否命中预期目标。
@@ -2126,6 +2180,7 @@ function cloneResidentialCredentials(credentials) {
 
 function cloneUserOptions(options) {
   return {
+    enabled: options.enabled,
     overrideMode: options.overrideMode
   };
 }
@@ -2186,6 +2241,8 @@ function main(config) {
   var residentialCredentials = null;
 
   ACTIVE_USER_OPTIONS = cloneUserOptions(USER_OPTIONS);
+
+  if (ACTIVE_USER_OPTIONS.enabled === false) return config;
 
   if (!shouldApplyOnlyDnsAndSniffer()) {
     residentialCredentials = preflightMergedMode(config);

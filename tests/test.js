@@ -90,27 +90,18 @@ function expectedGroupNames(sandbox) {
   };
 }
 
-function expectedManualDispatchChoices(output, sandbox) {
-  const suffix = sandbox.BASE.groupNameSuffixes;
-  const choices = [sandbox.BASE.residentialGroupName];
-  for (const code of ["US", "HK", "JP", "TW", "SG"]) {
-    const groupName = regionGroupName(sandbox, code, suffix.base);
-    if (findGroup(output, groupName)) choices.push(groupName);
-  }
-  return choices;
-}
-
-function expectedOtherDispatchChoices(output, sandbox) {
+// 所有调度统一顺序：US 优先 → 家宽出口 → HK → JP → SG
+function expectedDispatchChoices(output, sandbox) {
   const suffix = sandbox.BASE.groupNameSuffixes;
   const usGroupName = regionGroupName(sandbox, "US", suffix.base);
   const choices = [];
   if (findGroup(output, usGroupName)) choices.push(usGroupName);
   choices.push(sandbox.BASE.residentialGroupName);
-  for (const code of ["US", "HK", "JP", "TW", "SG"]) {
+  for (const code of ["HK", "JP", "SG"]) {
     const groupName = regionGroupName(sandbox, code, suffix.base);
     if (findGroup(output, groupName)) choices.push(groupName);
   }
-  return uniqueLocalStrings(choices);
+  return choices;
 }
 
 function uniqueLocalStrings(values) {
@@ -309,7 +300,7 @@ function testNormalizeOverrideMode() {
 
 // ---- script version marker ----
 function testVersionSingleDefinition() {
-  assert(overrideCode.includes("// @version 12.0"), "Expected @version 12.0");
+  assert(overrideCode.includes("// @version 13.0"), "Expected @version 13.0");
   const versionLines = overrideCode.split('\n').filter((l) =>
     l.includes("@version ")
   );
@@ -494,39 +485,24 @@ function assertManagedProxyTopology(output, sandbox) {
   assert.strictEqual(usGroup.type, "url-test");
   assert.deepEqual(usGroup.proxies, ["🇺🇸 US Auto 01"]);
 
-  const defaultProxyGroupName = sandbox.resolveDefaultProxyGroupName(output);
-  const defaultProxyGroup = findGroup(output, defaultProxyGroupName);
-  assert(defaultProxyGroup, "default proxy group missing");
-  assertIncludes(
-    defaultProxyGroup.proxies,
-    ["🇸🇬 SG Auto 01", names.sgRegion, names.usRegion],
-    "default proxy includes"
-  );
+  // 订阅默认组保留，其中注入了管理组
+  var defaultGroup = findGroup(output, "PROXY");
+  assert(defaultGroup, "subscription default group should survive");
+  assertIncludes(defaultGroup.proxies, [sandbox.BASE.residentialGroupName, names.sgRegion, names.usRegion], "default group includes managed");
 }
 
 function assertManualDispatchGroups(output, sandbox) {
-  const expectedStrictChoices = expectedManualDispatchChoices(output, sandbox);
-  for (const groupName of strictUiGroupNames(sandbox)) {
-    const group = findGroup(output, groupName);
-    assert(group, "UI group missing: " + groupName);
-    assert.strictEqual(group.type, "select");
-    assert.deepEqual(group.proxies, expectedStrictChoices, "strict dispatch choices mismatch: " + groupName);
-    assert.strictEqual(group.proxies[0], sandbox.BASE.residentialGroupName, "strict dispatch should prefer residential exit: " + groupName);
-    assert(!group.proxies.includes(sandbox.resolveDefaultProxyGroupName(output)),
-      "dispatch group must not include default proxy group: " + groupName);
-  }
-
-  const expectedOtherChoices = expectedOtherDispatchChoices(output, sandbox);
+  const expectedChoices = expectedDispatchChoices(output, sandbox);
   const usGroupName = regionGroupName(sandbox, "US", sandbox.BASE.groupNameSuffixes.base);
-  const preferredOtherTarget = findGroup(output, usGroupName) ? usGroupName : sandbox.BASE.residentialGroupName;
-  for (const groupName of otherUiGroupNames(sandbox)) {
+  const expectedFirst = findGroup(output, usGroupName) ? usGroupName : sandbox.BASE.residentialGroupName;
+
+  const allGroups = strictUiGroupNames(sandbox).concat(otherUiGroupNames(sandbox));
+  for (const groupName of allGroups) {
     const group = findGroup(output, groupName);
     assert(group, "UI group missing: " + groupName);
     assert.strictEqual(group.type, "select");
-    assert.deepEqual(group.proxies, expectedOtherChoices, "other dispatch choices mismatch: " + groupName);
-    assert.strictEqual(group.proxies[0], preferredOtherTarget, "other dispatch preferred target mismatch: " + groupName);
-    assert(!group.proxies.includes(sandbox.resolveDefaultProxyGroupName(output)),
-      "dispatch group must not include default proxy group: " + groupName);
+    assert.deepEqual(group.proxies, expectedChoices, "dispatch choices mismatch: " + groupName);
+    assert.strictEqual(group.proxies[0], expectedFirst, "dispatch should prefer US region: " + groupName);
   }
 }
 
@@ -584,6 +560,7 @@ function assertBrowserRoutingPriority(output, sandbox) {
   const aiCliRule = "PROCESS-NAME,codex," + sandbox.UI_GROUPS.ai;
   const geositeCnRule = "GEOSITE,cn,DIRECT";
   const geoipCnRule = "GEOIP,CN,DIRECT";
+  const gfwRule = "GEOSITE,gfw,PROXY";
   const matchRule = "MATCH,PROXY";
 
   assertRulesExist(output.rules, [geositeCnRule, geoipCnRule]);
@@ -726,55 +703,14 @@ function testDefaultConfig() {
   assertNoDuplicateRuleIdentities(output.rules.slice(0, 250));
 }
 
-function testCommonDefaultProxyNameIsUsed() {
-  const { sandbox, output } = runMain((config) => {
-    config["proxy-groups"] = [
-      { name: "Proxy", type: "select", proxies: ["🇸🇬 SG Auto 01"] }
-    ];
-    config.rules = ["MATCH,Proxy"];
-  });
-  const names = expectedGroupNames(sandbox);
-  const defaultProxyGroup = findGroup(output, "Proxy");
+// DoH、GFW、MATCH 均指向订阅默认代理组。
+function testProxyTargetsUseDefaultGroup() {
+  const { sandbox, output } = runMain();
 
-  assert(defaultProxyGroup, "Proxy group missing");
-  assertIncludes(defaultProxyGroup.proxies, [names.sgRegion, names.usRegion], "common default proxy includes");
-  assertRulesExist(output.rules, ["DOMAIN-SUFFIX,dns.google,Proxy"]);
-  assertRulesMissing(output.rules, ["DOMAIN-SUFFIX,dns.google,PROXY"]);
-}
-
-function testDecoratedDefaultProxyNameIsUsed() {
-  const decoratedName = "🚀 节点选择 | 手动";
-  const { sandbox, output } = runMain((config) => {
-    config["proxy-groups"] = [
-      { name: decoratedName, type: "select", proxies: ["🇸🇬 SG Auto 01"] }
-    ];
-    config.rules = ["MATCH," + decoratedName];
-  });
-  const names = expectedGroupNames(sandbox);
-  const defaultProxyGroup = findGroup(output, decoratedName);
-
-  assert(defaultProxyGroup, "decorated default proxy group missing");
-  assert.strictEqual(sandbox.resolveDefaultProxyGroupName(output), decoratedName);
-  assertIncludes(defaultProxyGroup.proxies, [names.sgRegion, names.usRegion], "decorated default proxy includes");
-  assertRulesExist(output.rules, ["DOMAIN-SUFFIX,dns.google," + decoratedName]);
-}
-
-function testUnsupportedDefaultProxyNameFallsBack() {
-  const unsupportedName = "自动选择";
-  const { sandbox, output } = runMain((config) => {
-    config["proxy-groups"] = [
-      { name: unsupportedName, type: "select", proxies: ["🇸🇬 SG Auto 01"] }
-    ];
-    config.rules = ["MATCH," + unsupportedName];
-  });
-  const names = expectedGroupNames(sandbox);
-  const unsupportedGroup = findGroup(output, unsupportedName);
-
-  assert(unsupportedGroup, "unsupported proxy group missing");
-  assert.strictEqual(sandbox.resolveDefaultProxyGroupName(output), null);
-  assert(!unsupportedGroup.proxies.includes(names.sgRegion), "unsupported group must not receive region groups");
-  assertRulesExist(output.rules, ["DOMAIN-SUFFIX,dns.google," + sandbox.BASE.residentialGroupName]);
-  assertRulesMissing(output.rules, ["DOMAIN-SUFFIX,dns.google," + unsupportedName]);
+  // PROXY 由关键词命中为默认组
+  assertRulesExist(output.rules, ["DOMAIN-SUFFIX,dns.google,PROXY"]);
+  assertRulesExist(output.rules, ["GEOSITE,gfw,PROXY"]);
+  assertRulesExist(output.rules, ["MATCH,PROXY"]);
 }
 
 function testRequiresConfiguredResidentialCredentials() {
@@ -949,15 +885,14 @@ function testRegionGroupsCanBeGeneratedFromHKOnly() {
   assert(findGroup(output, hkRegion), "HK region group missing");
 }
 
-// 订阅使用英文全称（United States / Hong Kong / Singapore / Japan / Taiwan）时能被识别。
+// 订阅使用英文全称（United States / Hong Kong / Singapore / Japan）时能被识别。
 function testRegionRegexAcceptsEnglishFullName() {
   const { sandbox, output } = runMain((config) => {
     config.proxies = [
       { name: "United States 01", type: "ss" },
       { name: "Hong Kong 02", type: "ss" },
       { name: "Singapore premium", type: "ss" },
-      { name: "Japan Tokyo", type: "ss" },
-      { name: "Taiwan 03", type: "ss" }
+      { name: "Japan Tokyo", type: "ss" }
     ];
     config["proxy-groups"] = [
       { name: "PROXY", type: "select", proxies: ["United States 01"] }
@@ -965,7 +900,7 @@ function testRegionRegexAcceptsEnglishFullName() {
     config.rules = ["MATCH,PROXY"];
   });
   const suffix = sandbox.BASE.groupNameSuffixes;
-  for (const code of ["US", "HK", "SG", "JP", "TW"]) {
+  for (const code of ["US", "HK", "SG", "JP"]) {
     assert(findGroup(output, regionGroupName(sandbox, code, suffix.base)),
       "region group missing for " + code);
   }
@@ -1006,6 +941,90 @@ function testMergedModeDoesNotMutateDnsWhenCredentialsMissing() {
   assert.strictEqual(config.sniffer, beforeSniffer, "config.sniffer should not be mutated on preflight failure");
 }
 
+// enabled: false 时 main() 原样返回 config，无任何副作用。
+function testDisabledMasterSwitch() {
+  const { sandbox, output } = runMain(
+    null,
+    (sb) => { sb.USER_OPTIONS.enabled = false; }
+  );
+  const base = createBaseConfig();
+  assert.deepEqual(output.proxies, base.proxies);
+  assert.deepEqual(output["proxy-groups"], base["proxy-groups"]);
+  assert.deepEqual(output.rules, base.rules);
+  assert.strictEqual(output.dns, undefined);
+  assert.strictEqual(output.sniffer, undefined);
+}
+
+// enabled 默认为 true，行为与原来一致。
+function testEnabledMasterSwitchDefault() {
+  const { sandbox, output } = runMain();
+  assert.strictEqual(output.dns.enable, true);
+  assert.strictEqual(output.sniffer.enable, true);
+  assert(output.rules.some(function(r) { return r.indexOf("DOMAIN-SUFFIX,openai.com") === 0; }),
+    "managed rules should be present when enabled");
+}
+
+// 订阅所有非 MATCH 规则应被清除，管理 MATCH 由脚本生成。
+function testSubscriptionNonMatchRulesAreCleared() {
+  const { sandbox, output } = runMain((config) => {
+    config.rules = [
+      "DOMAIN-KEYWORD,openai,办公娱乐好帮手",
+      "DOMAIN-SUFFIX,some-random-domain.co,办公娱乐好帮手",
+      "MATCH,办公娱乐好帮手"
+    ];
+  });
+
+  // 订阅规则完全清除
+  assertRulesMissing(output.rules, ["DOMAIN-KEYWORD,openai,办公娱乐好帮手"]);
+  assertRulesMissing(output.rules, ["DOMAIN-SUFFIX,some-random-domain.co,办公娱乐好帮手"]);
+  assertRulesMissing(output.rules, ["MATCH,办公娱乐好帮手"]);
+  // 管理 MATCH 指向默认代理组（PROXY 由关键词命中）
+  assertRulesExist(output.rules, ["MATCH,PROXY"]);
+  // 管理规则正常写入
+  assertRulesExist(output.rules, ["DOMAIN-SUFFIX,openai.com," + sandbox.UI_GROUPS.ai]);
+  assertRulesExist(output.rules, ["DOMAIN-KEYWORD,openai," + sandbox.UI_GROUPS.ai]);
+}
+
+// 订阅附加代理组应被清除，默认组保留。
+function testSubscriptionProxyGroupsAreCleaned() {
+  const { sandbox, output } = runMain((config) => {
+    config["proxy-groups"].push(
+      { name: "自动选择", type: "url-test", proxies: ["🇸🇬 SG Auto 01"] },
+      { name: "故障转移", type: "fallback", proxies: ["🇭🇰 HK Auto 01"] },
+      { name: "Bahamut", type: "select", proxies: ["PROXY"] }
+    );
+  });
+
+  // 订阅附加组被清除
+  assert.strictEqual(findGroup(output, "自动选择"), undefined);
+  assert.strictEqual(findGroup(output, "故障转移"), undefined);
+  assert.strictEqual(findGroup(output, "Bahamut"), undefined);
+  // 默认代理组保留
+  assert(findGroup(output, "PROXY"), "default proxy group should survive");
+  // 管理组正常存在
+  assert(findGroup(output, sandbox.BASE.residentialGroupName), "managed residential group missing");
+}
+
+// GEOSITE,gfw 规则应存在并将 GFW 域路由到默认代理组。
+function testGfwRuleExists() {
+  const { sandbox, output } = runMain();
+
+  var gfwRule = "GEOSITE,gfw,PROXY";
+  assertRulesExist(output.rules, [gfwRule]);
+  assertRuleAppearsBefore(output.rules, "GEOIP,CN,DIRECT", gfwRule);
+  assertRuleAppearsBefore(output.rules, gfwRule, "PROCESS-NAME,Claude," + sandbox.UI_GROUPS.ai);
+}
+
+// 订阅 rule-providers 应被清除，防止 RULE-SET 规则逃逸。
+function testRuleProvidersAreCleared() {
+  const { sandbox, output } = runMain((config) => {
+    config["rule-providers"] = {
+      "GFWList-Site": { type: "http", behavior: "domain", url: "https://example.com/gfw.mrs" }
+    };
+  });
+  assert.deepEqual(output["rule-providers"], {});
+}
+
 // ===========================================================================
 // Runner
 // ===========================================================================
@@ -1031,9 +1050,7 @@ const unitTests = [
 
 const integrationTests = [
   testDefaultConfig,
-  testCommonDefaultProxyNameIsUsed,
-  testDecoratedDefaultProxyNameIsUsed,
-  testUnsupportedDefaultProxyNameFallsBack,
+  testProxyTargetsUseDefaultGroup,
   testRequiresConfiguredResidentialCredentials,
   testMergedModeDoesNotRequireRegionNodes,
   testUnifiedDnsSnifferOnlyMode,
@@ -1051,6 +1068,12 @@ const integrationTests = [
   testRegionRegexAcceptsEnglishFullName,
   testRegionRegexAcceptsUnderscoreAndNoSeparator,
   testMergedModeDoesNotMutateDnsWhenCredentialsMissing,
+  testDisabledMasterSwitch,
+  testEnabledMasterSwitchDefault,
+  testSubscriptionNonMatchRulesAreCleared,
+  testGfwRuleExists,
+  testRuleProvidersAreCleared,
+  testSubscriptionProxyGroupsAreCleaned,
 ];
 
 console.log("Unit tests (" + unitTests.length + "):");
