@@ -4,9 +4,7 @@
 // 请在下面的 RESIDENTIAL_CREDENTIALS 和 USER_OPTIONS 中填写你的配置。
 // 兼容性：Clash Verge / Clash Party 的 JavaScriptCore；只用 ES5 语法。
 //
-// 单文件说明：由旧 config + override 两个入口合并而来。
-//
-// @version 13.0
+// @version 14.5
 
 // ===========================================================================
 // 用户配置
@@ -14,8 +12,7 @@
 
 var USER_OPTIONS = {
   enabled: true, // false = 关闭覆写，config 原样透传
-  // overrideMode: "dns-sniffer-only", // dns-sniffer-only = 只写 DNS/Sniffer
-  overrideMode: "merged" // merged = DNS/Sniffer + 家宽/媒体分流
+  overrideMode: "merged" // "merged" = 全覆写 | "dns-sniffer-only" = 仅 DNS/Sniffer
 };
 
 var RESIDENTIAL_CREDENTIALS = {
@@ -257,14 +254,28 @@ var RESIDENTIAL_EXIT = {
     openai: [
       "+.openai.com",
       "+.chatgpt.com",
+      "+.chat.com",
       "+.sora.com",
+      "+.crixet.com",
       "+.oaiusercontent.com", // OpenAI 官方静态资源与内容分发基础设施
-      "+.oaistatic.com"
+      "+.oaistatic.com",
+      "+.openai.com.cdn.cloudflare.net",
+      "+.openaiapi-site.azureedge.net",
+      "+.openaicom-api-bdcpf8c6d2e9atf6.z01.azurefd.net",
+      "+.openaicom.imgix.net",
+      "+.openaicomproductionae4b.blob.core.windows.net",
+      "+.production-openaicom-storage.azureedge.net",
+      "+.chatgpt.livekit.cloud",
+      "+.host.livekit.cloud",
+      "+.challenges.cloudflare.com",
+      "+.events.statsigapi.net",
+      "+.o33249.ingest.sentry.io"
     ],
     google_ai: [
       "+.gemini.google.com",
       "+.aistudio.google.com",
       "+.ai.google.dev",
+      "+.aiplatform.googleapis.com",
       "+.generativelanguage.googleapis.com",
       "+.ai.google",
       "+.notebooklm.google",
@@ -274,7 +285,10 @@ var RESIDENTIAL_EXIT = {
     ],
     google_antigravity: [
       "+.antigravity.google",
-      "+.antigravity-ide.com" // Antigravity IDE 的非 google 子域资源站
+      "+.antigravity-ide.com", // Antigravity IDE 的非 google 子域资源站
+      "+.cloudcode-pa.googleapis.com",
+      "+.daily-cloudcode-pa.googleapis.com",
+      "+.daily-cloudcode-pa.sandbox.googleapis.com"
     ],
     perplexity: [
       "+.perplexity.ai",
@@ -424,24 +438,58 @@ var RESIDENTIAL_EXIT = {
       apps: [
         "Claude",
         "ChatGPT",
+        "Codex",
         "Perplexity",
-        "Cursor"
+        "Cursor",
+        "Antigravity",
+        "Antigravity IDE"
       ],
       helperSuffixes: [
         "Helper"
       ],
       exact: [
         "ChatGPTHelper",
+        "Claude.exe",
         "Claude Helper (Renderer)",
         "Claude Helper (GPU)",
         "Claude Helper (Plugin)",
-        // macOS PROCESS-NAME 匹配 Bundle 可执行名，不含 `.app` 后缀。
-        // 未列入此处的应用：
-        //   - Claude Code / URL Handler 都以 `claude` 运行，统一通过 ai.cli 命中。
-        //   - Antigravity 的 Bundle 可执行名是 `Electron`，无法按进程名精确匹配，改走域名规则。
+        "Codex.exe",
+        "Codex Helper (Renderer)",
+        "Codex Helper (GPU)",
+        "Codex Helper (Plugin)",
+        "Antigravity.exe",
+        "Antigravity Helper (Renderer)",
+        "Antigravity Helper (GPU)",
+        "Antigravity Helper (Plugin)",
+        "Antigravity IDE.exe",
+        "Antigravity IDE Helper (Renderer)",
+        "Antigravity IDE Helper (GPU)",
+        "Antigravity IDE Helper (Plugin)",
+        "language_server",
+        "language_server.exe",
+        "language_server_macos_arm",
+        "language_server_macos_x64",
+        "language_server_linux_x64",
+        "language_server_windows_x64.exe",
+        "antigravity_tools",
+        // macOS PROCESS-NAME 匹配 Bundle 可执行名，不含 `.app` 后缀；Electron 进程名太宽，不列入。
+        // Claude Code / URL Handler 都以 `claude` 运行，统一通过 ai.cli 命中。
         "Quotio"
       ],
-      cli: ["claude", "gemini", "codex"]
+      cli: [
+        "claude",
+        "claude.exe",
+        "gemini",
+        "codex",
+        "codex.exe",
+        "codex-aarch64-apple-darwin",
+        "codex-x86_64-apple-darwin",
+        "codex-aarch64-unknown-linux-musl",
+        "codex-x86_64-unknown-linux-musl",
+        "agy",
+        "agy.exe",
+        "antigravity"
+      ]
     },
     browser: {
       apps: [
@@ -575,7 +623,7 @@ var MEDIA = {
   ],
   prime_video: [
     "+.primevideo.com",
-    "+.aiv-cdn.net",     // Prime Video CDN（不会牵连 amazon.com 主站和 AWS）
+    "+.aiv-cdn.net",     // Prime Video CDN（不会牵连 amazon.com 主站 and AWS）
     "+.aiv-delivery.net"
   ],
   twitch: [
@@ -1016,7 +1064,16 @@ var EXPECTED_ROUTES = {
     domains: [
       "claude.ai",
       "chatgpt.com",
+      "chat.com",
+      "openaiapi-site.azureedge.net",
+      "chatgpt.livekit.cloud",
+      "challenges.cloudflare.com",
       "gemini.google.com",
+      "aiplatform.googleapis.com",
+      "antigravity.google",
+      "cloudcode-pa.googleapis.com",
+      "daily-cloudcode-pa.googleapis.com",
+      "daily-cloudcode-pa.sandbox.googleapis.com",
       "perplexity.ai",
       "google.com",
       "cursor.sh",             // Cursor 后端
@@ -1031,8 +1088,8 @@ var EXPECTED_ROUTES = {
       "notion.so",             // Notion 协作知识库
       "intercom.io"            // Intercom 客服（Anthropic 等使用）
     ],
-    processNames: ["Claude"],
-    cliNames: ["claude", "codex"]
+    processNames: ["Claude", "Claude.exe", "Codex", "Codex.exe", "Antigravity", "Antigravity IDE", "language_server"],
+    cliNames: ["claude", "claude.exe", "codex", "codex.exe", "codex-aarch64-apple-darwin", "agy"]
   },
   toMedia: {
     domains: [
@@ -1196,20 +1253,22 @@ function buildPolicy() {
     },
 
     // ---- direct · 直连 ----
-    // Apple 不绑定 dnsZone，走 nameserver + fallback 并行查询 + fallback-filter geoip 仲裁：
-    // SG：域内 DoH 返回非 CN IP → fallback-filter 选域外结果 → 全球 CDN；
-    // CN：域内 DoH 返回 CN Apple CDN → 直接使用。两端都不依赖单侧 DoH 可用性。
+    // Apple/iCloud 绑定 domestic DoH：国内有 Apple CDN，域内 DoH 直返 CN 节点，直连最快；
+    // 不经 overseas fallback，避免节点断连时 DNS 卡在等 overseas DoH（Apple 流量本就走 DIRECT）。
     {
       key: "direct.apple", patterns: flattenGroupedPatterns(OVERSEAS.special.apple),
-      route: "direct", fakeIpBypass: true, fallbackFilter: true
+      route: "direct", dnsZone: "domestic", fakeIpBypass: true, fallbackFilter: true
     },
+    // 出口检测站 DIRECT 展示本机真实 IP；未被墙，domestic DoH 足够且不依赖代理。
     {
       key: "direct.egressCheck", patterns: flattenGroupedPatterns(OVERSEAS.special.egressCheck),
-      route: "direct", dnsZone: "overseas", fallbackFilter: true
+      route: "direct", dnsZone: "domestic", fallbackFilter: true
     },
+    // Tailscale/ZeroTier/Plex/Synology 等直连应用未被墙，domestic DoH 返回真实 IP 即可，
+    // 不走 overseas DoH，避免节点断连时解析卡死。
     {
       key: "direct.overseasApps", patterns: flattenGroupedPatterns(OVERSEAS.global.apps),
-      route: "direct", dnsZone: "overseas", sniffer: "skip", fallbackFilter: true
+      route: "direct", dnsZone: "domestic", sniffer: "skip", fallbackFilter: true
     },
     {
       key: "direct.cnAppsOverseasDoh", patterns: flattenGroupedPatterns(OVERSEAS.global.cnApps),
@@ -1277,38 +1336,66 @@ function projectRoutedPatterns(route, directPatterns) {
 //   proxy    → 进通用代理组（用于强制 DoH 服务器等前跳代理寻址）
 //   sniffer  → force / skip 两侧的嗅探决策
 //   fakeIpBypass → 需要返回真实 IP 的域名（Apple 等）
+
+// 家宽出口 route 顺序与桶分组。support 桶合并 residential.cdn，integrations 桶合并
+// residential.cloudflare —— 把这条隐藏的合并规则显式写成数据（决定 cdn/cloudflare 落到哪个 UI 面板）。
+var RESIDENTIAL_ROUTES = [
+  "residential.ai",
+  "residential.support",
+  "residential.integrations",
+  "residential.cloudflare",
+  "residential.cdn"
+];
+var RESIDENTIAL_ROUTE_GROUPS = {
+  ai: ["residential.ai"],
+  support: ["residential.support", "residential.cdn"],
+  integrations: ["residential.integrations", "residential.cloudflare"]
+};
+var MEDIA_ROUTE_GROUPS = {
+  video: ["media.video"],
+  music: ["media.music"],
+  social: ["media.social"],
+  im: ["media.im"]
+};
+
+// 按 routeGroups 把每条 route 投影（排除 direct）后合并成桶；
+// allRoutes 指定 .all 汇总顺序——桶内合并会重排，.all 需按原始 route 序保持稳定。
+function buildRouteGrouped(routeGroups, directPatterns, allRoutes) {
+  var grouped = {};
+  Object.keys(routeGroups).forEach(function (bucketKey) {
+    var routes = routeGroups[bucketKey];
+    var bucketPatterns = [];
+    for (var i = 0; i < routes.length; i++) {
+      bucketPatterns.push(projectRoutedPatterns(routes[i], directPatterns));
+    }
+    grouped[bucketKey] = mergeStringGroups(bucketPatterns);
+  });
+  var allOrdered = allRoutes;
+  if (!allOrdered) {
+    allOrdered = [];
+    Object.keys(routeGroups).forEach(function (bucketKey) {
+      var routes = routeGroups[bucketKey];
+      for (var m = 0; m < routes.length; m++) allOrdered.push(routes[m]);
+    });
+  }
+  var allPatterns = [];
+  for (var j = 0; j < allOrdered.length; j++) {
+    allPatterns.push(projectRoutedPatterns(allOrdered[j], directPatterns));
+  }
+  grouped.all = mergeStringGroups(allPatterns);
+  return grouped;
+}
+
 function buildDerivedPatterns() {
   var direct = projectPolicyPatterns(matchRoute("direct"));
   var proxy = projectRoutedPatterns("proxy", direct);
-
-  var residentialAi = projectRoutedPatterns("residential.ai", direct);
-  var residentialSupport = projectRoutedPatterns("residential.support", direct);
-  var residentialIntegrations = projectRoutedPatterns("residential.integrations", direct);
-  var residentialCloudflare = projectRoutedPatterns("residential.cloudflare", direct);
-  var residentialCdn = projectRoutedPatterns("residential.cdn", direct);
-  var residentialAll = mergeStringGroups([residentialAi, residentialSupport, residentialIntegrations, residentialCloudflare, residentialCdn]);
-
-  var mediaVideo = projectRoutedPatterns("media.video", direct);
-  var mediaMusic = projectRoutedPatterns("media.music", direct);
-  var mediaSocial = projectRoutedPatterns("media.social", direct);
-  var mediaIm = projectRoutedPatterns("media.im", direct);
-  var mediaAll = mergeStringGroups([mediaVideo, mediaMusic, mediaSocial, mediaIm]);
+  var residential = buildRouteGrouped(RESIDENTIAL_ROUTE_GROUPS, direct, RESIDENTIAL_ROUTES);
+  var media = buildRouteGrouped(MEDIA_ROUTE_GROUPS, direct);
 
   return {
     proxy: proxy,
-    residential: {
-      ai: residentialAi,
-      support: mergeStringGroups([residentialSupport, residentialCdn]),
-      integrations: mergeStringGroups([residentialIntegrations, residentialCloudflare]),
-      all: residentialAll
-    },
-    media: {
-      video: mediaVideo,
-      music: mediaMusic,
-      social: mediaSocial,
-      im: mediaIm,
-      all: mediaAll
-    },
+    residential: residential,
+    media: media,
     direct: direct,
     fakeIpBypass: projectPolicyPatterns(matchFakeIpBypass),
     // Sniffer 是 fake-ip 模式的安全网：当 fake-IP 映射丢失或 QUIC 跳过 DNS 时，
@@ -1316,7 +1403,7 @@ function buildDerivedPatterns() {
     //   force → 家宽出口域名 + 所有 sniffer:"force" 条目（Cloudflare 等）
     //   skip  → Tailscale / Plex / Apple 推送等故意用 IP 语义的直连应用
     sniffer: {
-      force: residentialAll,
+      force: residential.all,
       skip: projectPolicyPatterns(matchSniffer("skip"))
     }
   };
@@ -1449,7 +1536,7 @@ function buildDnsFallbackFilter() {
 // 效果：
 //   家宽出口域名的 DoH 查询 → 经家宽出口面板出去 → dns.google 看到的是所选出口 IP
 //   direct 域名的 DoH 查询 → 走 direct-nameserver（域内 DoH）→ 本地直连
-//   media 域名的 DoH 查询 → 经媒体代理组出去
+//   media 域名的 DoH 查询 → 经 media 代理组出去
 // 为什么需要：
 //   respect-rules: false 时，所有 DoH 查询都从本地网络直连发出。
 //   在 CN 出差时这意味着：
@@ -1583,13 +1670,11 @@ function normalizeRegionKey(region) {
   return region.toUpperCase();
 }
 
-// 根据地区键解析地区元数据，并按需提供兜底标签。
-function resolveRegionMeta(region, allowFallbackRegionLabel) {
+function resolveRegionMeta(region) {
   var regionKey = normalizeRegionKey(region);
   var source = BASE.regions[regionKey];
-  var meta = source ? { regex: source.regex, label: source.label, flag: source.flag, code: regionKey } : null;
-  if (!meta && allowFallbackRegionLabel) meta = { label: region, flag: "🌐", code: regionKey };
-  return meta;
+  if (!source) return null;
+  return { regex: source.regex, label: source.label, flag: source.flag, code: regionKey };
 }
 
 // 基于地区国旗与中文标签拼出代理组名称（如 分区测速.🇸🇬 新加坡节点组）。
@@ -1598,7 +1683,6 @@ function buildRegionGroupName(regionMeta, groupNameSuffix) {
 }
 
 // 根据凭证和端点信息生成一个家宽出口 HTTP 代理节点。
-// 硬编码 type:"http" 在加载期校验：确保 "http" 在 BASE.validProxyTypes 白名单内。
 function buildResidentialProxy(residentialCredentials, proxyName, endpoint) {
   if (BASE.validProxyTypes.indexOf("http") < 0) {
     throw createUserError("家宽出口代理类型 http 不在 Clash 合法代理类型列表中，请检查 BASE.validProxyTypes");
@@ -1634,12 +1718,6 @@ function upsertNamedItem(items, itemDefinition) {
   if (itemIndex >= 0) items[itemIndex] = itemDefinition;
   else items.push(itemDefinition);
   return itemDefinition;
-}
-
-// 按名称删除旧受管条目，用于清理已废弃的代理节点。
-function removeNamedItem(items, targetName) {
-  var itemIndex = findNamedItemIndex(items, targetName);
-  if (itemIndex >= 0) items.splice(itemIndex, 1);
 }
 
 // 按名称查找单个代理节点。
@@ -1734,7 +1812,6 @@ function upsertRegionUrlTestGroup(proxyGroups, groupName, regionNodeNames) {
   });
 }
 
-// 将代理组追加到节点选择组。
 // 注入家宽出口官方中转节点。
 function writeResidentialProxies(config, residentialCredentials) {
   upsertNamedItem(
@@ -1745,7 +1822,7 @@ function writeResidentialProxies(config, residentialCredentials) {
 
 // 仅根据订阅节点创建或修正指定地区的 `url-test` 代理组。
 function writeRegionGroup(config, region, groupNameSuffix) {
-  var regionMeta = resolveRegionMeta(region, false);
+  var regionMeta = resolveRegionMeta(region);
   if (!regionMeta) return null;
 
   var regionRegex = regionMeta.regex;
@@ -1931,7 +2008,6 @@ function buildManagedRules(derived, routingTargets) {
   return dedupeRulesByIdentity(concatenated);
 }
 
-
 // 注入管理规则（置顶），由脚本生成 MATCH 兜底。
 // 同时清除订阅的 rule-providers，防止 RULE-SET 规则逃逸。
 function writeManagedRules(config, routingTargets, derived) {
@@ -1996,15 +2072,21 @@ function buildStrictProcessGroups(derived) {
   return [derived.processNames.aiApps, derived.processNames.aiCli];
 }
 
+// 对一组派生域名桶批量生成 DOMAIN-SUFFIX + DOMAIN-KEYWORD 规则。
+// bucket 每个键（跳过汇总键 all）映射到 targetByKey 中同名的 UI 面板。
+function appendDomainRuleGroups(ruleLines, bucket, targetByKey) {
+  Object.keys(bucket).forEach(function (bucketKey) {
+    if (bucketKey === "all") return;
+    var target = targetByKey[bucketKey];
+    appendSuffixRules(ruleLines, bucket[bucketKey], target);
+    appendKeywordRules(ruleLines, bucket[bucketKey], target);
+  });
+}
+
 // 生成家宽出口域名规则：AI / 支撑平台 / 集成服务显式锁定到家宽出口面板。
 function buildResidentialDomainRules(derived) {
   var ruleLines = [];
-  appendSuffixRules(ruleLines, derived.patterns.residential.ai, UI_GROUPS.ai);
-  appendKeywordRules(ruleLines, derived.patterns.residential.ai, UI_GROUPS.ai);
-  appendSuffixRules(ruleLines, derived.patterns.residential.support, UI_GROUPS.support);
-  appendKeywordRules(ruleLines, derived.patterns.residential.support, UI_GROUPS.support);
-  appendSuffixRules(ruleLines, derived.patterns.residential.integrations, UI_GROUPS.integrations);
-  appendKeywordRules(ruleLines, derived.patterns.residential.integrations, UI_GROUPS.integrations);
+  appendDomainRuleGroups(ruleLines, derived.patterns.residential, UI_GROUPS);
   return ruleLines;
 }
 
@@ -2032,14 +2114,7 @@ function buildBrowserResidentialRules(derived) {
 // 生成媒体组选区规则，只承载媒体域名。
 function buildMediaRules(derived) {
   var ruleLines = [];
-  appendSuffixRules(ruleLines, derived.patterns.media.video, UI_GROUPS.video);
-  appendKeywordRules(ruleLines, derived.patterns.media.video, UI_GROUPS.video);
-  appendSuffixRules(ruleLines, derived.patterns.media.music, UI_GROUPS.music);
-  appendKeywordRules(ruleLines, derived.patterns.media.music, UI_GROUPS.music);
-  appendSuffixRules(ruleLines, derived.patterns.media.social, UI_GROUPS.social);
-  appendKeywordRules(ruleLines, derived.patterns.media.social, UI_GROUPS.social);
-  appendSuffixRules(ruleLines, derived.patterns.media.im, UI_GROUPS.im);
-  appendKeywordRules(ruleLines, derived.patterns.media.im, UI_GROUPS.im);
+  appendDomainRuleGroups(ruleLines, derived.patterns.media, UI_GROUPS);
   return ruleLines;
 }
 
@@ -2076,16 +2151,6 @@ function assertManagedRuleTargetExpanded(ruleLineLookup, type, value, validTarge
   throw createUserError(
     "关键规则未正确写入: " + type + "," + value + "（未查到映射至合规的可视化分组），请检查脚本源数据覆盖"
   );
-}
-
-// 判断两个字符串数组集合相等（无视顺序、不允许重复）。
-function haveSameStringSet(values, expectedValues) {
-  if (values.length !== expectedValues.length) return false;
-  var lookup = buildStringLookup(values);
-  for (var i = 0; i < expectedValues.length; i++) {
-    if (!lookup[expectedValues[i]]) return false;
-  }
-  return true;
 }
 
 // 断言路由目标一致性：strictAi = 家宽出口组。
@@ -2129,6 +2194,16 @@ function assertResidentialGroupShape(config, residentialGroupName) {
       "当前家宽出口组内容异常，请检查代理组注入逻辑"
     );
   }
+}
+
+// 判断两个字符串数组集合相等（无视顺序、不允许重复）。
+function haveSameStringSet(values, expectedValues) {
+  if (values.length !== expectedValues.length) return false;
+  var lookup = buildStringLookup(values);
+  for (var i = 0; i < expectedValues.length; i++) {
+    if (!lookup[expectedValues[i]]) return false;
+  }
+  return true;
 }
 
 // 逐条断言一批校验目标在最终规则里命中预期合规集合的任何一个。
@@ -2273,9 +2348,6 @@ function resolveConfiguredResidentialCredentials(credentials) {
 }
 
 // merged 模式前置校验：在 DNS/Sniffer 写入之前完成所有可抛项。
-// 这样当校验失败时，用户看到明确错误，且 config 保持未被任何脚本改动的原样。
-// 设计动机：main 中途抛错会被 Clash Verge 视为脚本失败 → 整体回退到原 profile，
-// 用户感知是"脚本完全没生效"。前置校验避免写 DNS 后却因缺凭证抛错的中间态。
 function preflightMergedMode(config) {
   var credentials = resolveConfiguredResidentialCredentials(RESIDENTIAL_CREDENTIALS);
   return credentials;

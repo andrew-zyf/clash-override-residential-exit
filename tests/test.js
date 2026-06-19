@@ -300,7 +300,7 @@ function testNormalizeOverrideMode() {
 
 // ---- script version marker ----
 function testVersionSingleDefinition() {
-  assert(overrideCode.includes("// @version 13.0"), "Expected @version 13.0");
+  assert(overrideCode.includes("// @version 14.5"), "Expected @version 14.5");
   const versionLines = overrideCode.split('\n').filter((l) =>
     l.includes("@version ")
   );
@@ -619,7 +619,7 @@ function assertOverseasAppDirectCoverage(output, dnsBase) {
     "PROCESS-NAME,Tailscale,DIRECT",
     "PROCESS-NAME,tailscale,DIRECT"
   ]);
-  assertNameserverPolicyValues(output, overseasAppDomains, dnsBase.overseas);
+  assertNameserverPolicyValues(output, overseasAppDomains, dnsBase.domestic);
   assert.strictEqual(output.dns["fallback-filter"].domain, undefined, "fallback-filter.domain should be absent");
   assertIncludes(output.sniffer["skip-domain"], overseasAppDomains, "sniffer.skip-domain");
   assertExcludes(output.dns["fake-ip-filter"], ["+.tailscale.com"], "fake-ip-filter");
