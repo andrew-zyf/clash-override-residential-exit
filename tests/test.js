@@ -77,7 +77,7 @@ function runMain(configMutator, sandboxMutator) {
 // ---------------------------------------------------------------------------
 
 function regionGroupName(sandbox, regionKey, suffix) {
-  var meta = sandbox.resolveRegionMeta(regionKey, true);
+  var meta = sandbox.resolveRegionMeta(regionKey);
   return sandbox.buildRegionGroupName(meta, suffix);
 }
 
@@ -104,17 +104,6 @@ function expectedDispatchChoices(output, sandbox) {
   return choices;
 }
 
-function uniqueLocalStrings(values) {
-  const seen = new Set();
-  const result = [];
-  for (const value of values) {
-    if (seen.has(value)) continue;
-    seen.add(value);
-    result.push(value);
-  }
-  return result;
-}
-
 function strictUiGroupNames(sandbox) {
   return [
     sandbox.UI_GROUPS.ai,
@@ -125,18 +114,6 @@ function strictUiGroupNames(sandbox) {
 
 function otherUiGroupNames(sandbox) {
   return [
-    sandbox.UI_GROUPS.video,
-    sandbox.UI_GROUPS.music,
-    sandbox.UI_GROUPS.social,
-    sandbox.UI_GROUPS.im
-  ];
-}
-
-function uiGroupNames(sandbox) {
-  return [
-    sandbox.UI_GROUPS.ai,
-    sandbox.UI_GROUPS.support,
-    sandbox.UI_GROUPS.integrations,
     sandbox.UI_GROUPS.video,
     sandbox.UI_GROUPS.music,
     sandbox.UI_GROUPS.social,

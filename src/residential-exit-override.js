@@ -1400,10 +1400,10 @@ function buildDerivedPatterns() {
     fakeIpBypass: projectPolicyPatterns(matchFakeIpBypass),
     // Sniffer 是 fake-ip 模式的安全网：当 fake-IP 映射丢失或 QUIC 跳过 DNS 时，
     // 从 TLS SNI / HTTP Host 恢复域名，确保 AI 流量命中家宽出口规则而非漏到 MATCH。
-    //   force → 家宽出口域名 + 所有 sniffer:"force" 条目（Cloudflare 等）
+    //   force → 所有 sniffer:"force" 条目（家宽出口域名 + Cloudflare 等）
     //   skip  → Tailscale / Plex / Apple 推送等故意用 IP 语义的直连应用
     sniffer: {
-      force: residential.all,
+      force: projectPolicyPatterns(matchSniffer("force")),
       skip: projectPolicyPatterns(matchSniffer("skip"))
     }
   };
