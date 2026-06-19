@@ -696,7 +696,7 @@ function testDefaultConfig() {
   assertOverseasAppDirectCoverage(output, dnsBase);
   assertOverseasDohDirectCoverage(output, dnsBase);
   assertDnsAndSniffer(output, dnsBase);
-  assertNoDuplicateRuleIdentities(output.rules.slice(0, 250));
+  assertNoDuplicateRuleIdentities(output.rules);
 }
 
 // DoH、GFW、MATCH 均指向订阅默认代理组。

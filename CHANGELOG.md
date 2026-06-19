@@ -4,6 +4,25 @@
 
 ---
 
+## v14.5 (2026-06-19)
+
+**DNS 优化（direct 应用）**
+- Apple/iCloud、出口检测站（ping0 / ipinfo / ifconfig / ip.sb）、Tailscale / ZeroTier / Plex / Synology 等 direct 应用的 DoH 由 overseas 改为 domestic。这些流量本就走 DIRECT，国内有 CDN，域内 DoH 直返 CN 节点最快；也避免代理节点断连时 DNS 卡在等 overseas DoH。
+
+**域名增补**
+- OpenAI：chat.com、crixet.com、CDN / Azure 静态资源域（openaicom 系列）、livekit 实时语音域（chatgpt.livekit.cloud）、challenges.cloudflare.com、statsig / sentry 遥测上报域。
+- Google AI：aiplatform.googleapis.com、Antigravity 的 cloudcode 系列域。
+
+**进程清单扩充**
+- AI 桌面 App 新增 Codex / Antigravity / Antigravity IDE，及其 Windows `.exe`、Helper（Renderer / GPU / Plugin）子进程、`language_server` 系列。
+- AI CLI 新增 `claude.exe`、`codex` 各平台二进制名（darwin / linux · aarch64 / x86_64）、`agy`、`antigravity`。
+
+**重构**
+- 引入 `buildRouteGrouped` + `RESIDENTIAL_ROUTES` / `RESIDENTIAL_ROUTE_GROUPS` / `MEDIA_ROUTE_GROUPS` 数据化路由桶投影，替代手写分桶。
+- 新增 `appendDomainRuleGroups` 统一域名规则生成。
+- 移除冗余的 `ACTIVE_USER_OPTIONS` / `cloneUserOptions`（直接读 `USER_OPTIONS`）、`removeNamedItem`、`resolveRegionMeta` 的兜底标签参数。
+- `@version` 13.0 → 14.5。
+
 ## v13.0 (2026-05-22)
 
 **架构变更**
