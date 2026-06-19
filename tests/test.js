@@ -277,7 +277,7 @@ function testNormalizeOverrideMode() {
 
 // ---- script version marker ----
 function testVersionSingleDefinition() {
-  assert(overrideCode.includes("// @version 14.5"), "Expected @version 14.5");
+  assert(overrideCode.includes("// @version 14.7"), "Expected @version 14.7");
   const versionLines = overrideCode.split('\n').filter((l) =>
     l.includes("@version ")
   );

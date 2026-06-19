@@ -4,7 +4,7 @@
 // 请在下面的 RESIDENTIAL_CREDENTIALS 和 USER_OPTIONS 中填写你的配置。
 // 兼容性：Clash Verge / Clash Party 的 JavaScriptCore；只用 ES5 语法。
 //
-// @version 14.5
+// @version 14.7
 
 // ===========================================================================
 // 用户配置
@@ -1574,7 +1574,9 @@ function buildDnsConfig(derived) {
 }
 
 // 构建 Sniffer 配置。
-// TLS (443/8443) / HTTP (80/8080/8880) / QUIC (443) 三种协议均开启嗅探。
+// TLS (443/8443) / HTTP (80/8080/8880) 两种协议开启嗅探。
+// QUIC（UDP:443）不在此嗅探：已被规则链最前端的全局 REJECT 拦截（见 buildQuicRejectRules），
+// 客户端回退到 TCP+TLS，仍由 TLS 嗅探覆盖；拦截本身也避免运营商借 QUIC 特征识别代理。
 // force-domain：从 SNI/Host 恢复域名，防止 AI 流量因缺域名漏到 MATCH。
 // skip-domain：保留 IP 语义，避免破坏 P2P 打洞和推送通道。
 function buildSnifferConfig(derived) {
@@ -1584,8 +1586,7 @@ function buildSnifferConfig(derived) {
     "parse-pure-ip": true,
     sniff: {
       TLS: { ports: [443, 8443] },
-      HTTP: { ports: [80, 8080, 8880], "override-destination": true },
-      QUIC: { ports: [443] }
+      HTTP: { ports: [80, 8080, 8880], "override-destination": true }
     },
     "force-domain": derived.patterns.sniffer.force,
     "skip-domain": derived.patterns.sniffer.skip
@@ -1638,7 +1639,7 @@ var BASE = {
   rulePrefixes: {
     match: "MATCH," // Clash 兜底规则固定前缀
   },
-  urlTestProbeUrl: "http://www.gstatic.com/generate_204",
+  urlTestProbeUrl: "http://cp.cloudflare.com/generate_204",
   residentialProxyNameKeyword: "家宽出口",
   groupNameSuffixes: {
     base: "节点组"
@@ -1995,9 +1996,17 @@ function dedupeRulesByIdentity(ruleLines) {
   return deduped;
 }
 
-// 拼接所有管理规则。顺序即优先级：显式域名 → 媒体 → DoH → 直连 → CN → GFW → 进程 → MATCH。
+// 全局拦截 QUIC（UDP:443）。
+// 运营商可借 QUIC 流量特征识别代理 / VPN 使用；拦截后客户端回退到 TCP+TLS，
+// 走普通 HTTPS 通道，特征更隐蔽。置于规则链最前端，对所有出口（含 DIRECT）生效。
+function buildQuicRejectRules() {
+  return ["AND,((NETWORK,udp),(DST-PORT,443)),REJECT"];
+}
+
+// 拼接所有管理规则。顺序即优先级：QUIC 拦截 → 显式域名 → 媒体 → DoH → 直连 → CN → GFW → 进程 → MATCH。
 function buildManagedRules(derived, routingTargets) {
-  var concatenated = buildResidentialDomainRules(derived)
+  var concatenated = buildQuicRejectRules()
+    .concat(buildResidentialDomainRules(derived))
     .concat(buildMediaRules(derived))
     .concat(buildProxyRules(derived, routingTargets.defaultProxyTarget))
     .concat(buildDirectRules(derived))

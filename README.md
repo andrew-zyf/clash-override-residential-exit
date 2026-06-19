@@ -2,7 +2,7 @@
 
 Clash 覆写脚本。通过 `家宽出口（官方中转）` 提供固定家宽出口，把 AI、开发平台、支付验证、遥测等高敏流量集中到可手动切换的调度面板里，降低出口 IP 不一致带来的风控风险。
 
-**当前版本：** v14.5
+**当前版本：** v14.7
 
 ## 快速开始
 
@@ -34,7 +34,7 @@ var RESIDENTIAL_CREDENTIALS = {
 脚本接收订阅 config，全部接管：
 
 - **代理组** — 清除订阅附带的分组，只保留 `az.*` 管理组和默认代理组。家宽出口和分区测速组注入默认组候选列表。
-- **规则** — 丢弃订阅全部规则，由 POLICY 投影生成。顺序：AI/支撑/集成域名（suffix + keyword 双轨）→ 媒体域名 → DoH → 直连 → CN → GFW → 进程 → MATCH。
+- **规则** — 丢弃订阅全部规则，由 POLICY 投影生成。顺序：QUIC 拦截（UDP:443 全局 REJECT）→ AI/支撑/集成域名（suffix + keyword 双轨）→ 媒体域名 → DoH → 直连 → CN → GFW → 进程 → MATCH。
 - **DNS** — Fake-IP 模式、`respect-rules: true`。高敏域名通过 `nameserver-policy` 显式绑定域外 DoH，`sniffer.force-domain` 兜底恢复域名。
 - **节点** — 全部保留不动。
 - **默认代理组** — 按关键词（`PROXY`、`节点选择`、`手动选择`、`GLOBAL`）识别，失败时从 MATCH 规则提取。MATCH / DoH / GFW 统一指向它。

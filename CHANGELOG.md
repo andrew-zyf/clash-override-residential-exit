@@ -4,6 +4,28 @@
 
 ---
 
+## v14.7 (2026-06-19)
+
+**测速探针更换**
+- `urlTestProbeUrl` 由 `http://www.gstatic.com/generate_204`（Google）改为 `http://cp.cloudflare.com/generate_204`（Cloudflare）。
+- 原因：部分节点出口到 Google 不通，url-test 显示 timeout（假象，节点实际可用）。Cloudflare 探针可达性更通用，延迟显示更准。
+- 仅影响脚本生成的 `az.分区测速.*` url-test 组；订阅自带组用订阅自己的探针，不在本脚本控制范围。
+
+- `@version` 14.6 → 14.7。
+
+## v14.6 (2026-06-19)
+
+**反检测：全局拦截 QUIC**
+- 规则链最前端注入 `AND,((NETWORK,udp),(DST-PORT,443)),REJECT`，强制客户端从 QUIC 回退到 TCP+TLS，避免运营商借 QUIC 流量特征识别代理 / VPN。
+- 移除 sniffer 的 QUIC 嗅探端口（已被上游 REJECT 拦截，成死配置）；TLS / HTTP 嗅探保留。
+
+**DNS 评估（维持现状，未引入 DoH3）**
+- 主链路 DNS 全部走 DoH（dns.google / cloudflare-dns / alidns / doh.pub / quad9），不含 DoQ / DoT。
+- DoH3 跑在 QUIC 上，与全局 QUIC 拦截直接冲突，故不引入；DoH（TCP+TLS）已满足加密与反识别需要。
+- `default-nameserver` 维持明文引导（`223.5.5.5` / `119.29.29.29`）：仅解析 DoH 服务器自身域名。曾尝试 IP 字面量 DoH + `#SNI`，但在目标 mihomo 上导致全部节点 timeout（DNS 引导失败），已回退。
+
+- `@version` 14.5 → 14.6。
+
 ## v14.5 (2026-06-19)
 
 **DNS 优化（direct 应用）**
